@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+checkpoints/*.pt
+models/*.aimodel/
+models/*.aimodelc/
+data/
+.build/
+*.xcodeproj
+.DS_Store
+*.egg-info/

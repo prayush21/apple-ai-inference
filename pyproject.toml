@@ -1,0 +1,29 @@
+[project]
+name = "snake-ai"
+version = "0.1.0"
+description = "Clone of the WWDC26 'Meet Core AI' snake demo: PyTorch -> Core AI pipeline"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "torch>=2.8,<2.13",
+    "coreai-torch>=0.4.2",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+snake-train = "snake_ai.train:main"
+snake-convert = "snake_ai.convert:main"
+snake-verify = "snake_ai.verify:main"
+snake-play = "snake_ai.play:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["snake_ai*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
