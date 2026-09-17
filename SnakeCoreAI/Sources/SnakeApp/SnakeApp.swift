@@ -25,6 +25,7 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            picker
             hud
             BoardView(game: vm.game)
                 .frame(width: 420, height: 420)
@@ -37,12 +38,47 @@ struct ContentView: View {
                 .onKeyPress(.rightArrow) { vm.steer(.right); return .handled }
                 .onKeyPress(.space) { vm.start(); return .handled }
             footer
+            scoreboard
         }
         .padding(16)
         .onAppear {
             focused = true
             // SNAKE_AUTOSTART=1 starts a game immediately (used for smoke tests).
             if ProcessInfo.processInfo.environment["SNAKE_AUTOSTART"] != nil { vm.start() }
+        }
+    }
+
+    private var picker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("Snake A", selection: $vm.aiKind) {
+                ForEach(AIKind.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text(vm.aiKind.blurb)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var scoreboard: some View {
+        HStack(spacing: 14) {
+            ForEach(AIKind.allCases) { kind in
+                let s = vm.scores[kind] ?? Scoreboard()
+                HStack(spacing: 4) {
+                    Text(kind.rawValue.replacingOccurrences(of: "Model · ", with: ""))
+                        .fontWeight(kind == vm.aiKind ? .semibold : .regular)
+                    Text("AI \(s.aiWins) · you \(s.humanWins)\(s.draws > 0 ? " · draw \(s.draws)" : "")")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            }
+            Spacer()
+            if let avg = vm.averageInferenceMs {
+                Text(String(format: "avg %.2f ms/move", avg))
+                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            }
         }
     }
 

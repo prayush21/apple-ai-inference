@@ -3,8 +3,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 checkpoints/*.pt
-models/*.aimodel/
-models/*.aimodelc/
+**/*.aimodel/
+**/*.aimodelc/
 data/
 .build/
 *.xcodeproj

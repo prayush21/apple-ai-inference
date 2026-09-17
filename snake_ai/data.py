@@ -22,7 +22,18 @@ import numpy as np
 
 from .features import FEATURE_DIM, extract_features
 from .game import Direction, SnakeGame
-from .policy import HeuristicPolicy
+from .minimax import MinimaxPolicy
+from .policy import HeuristicPolicy, Policy
+
+
+def make_teacher(name: str = "heuristic", depth: int = 1) -> Policy:
+    """``heuristic`` (greedy flood fill) or ``minimax`` (adversarial lookahead,
+    see ``snake_ai.minimax``)."""
+    if name == "heuristic":
+        return HeuristicPolicy(epsilon=0.0)
+    if name == "minimax":
+        return MinimaxPolicy(depth=depth)
+    raise ValueError(f"unknown teacher {name!r}")
 
 # An actor picks snake 0's move from the game and the feature history so far.
 Actor = Callable[[SnakeGame, list[list[float]]], Direction]
@@ -33,6 +44,7 @@ Episode = tuple[np.ndarray, np.ndarray]  # features [T, 16], actions [T]
 def simulate_episode(
     seed: int,
     *,
+    teacher: Policy | None = None,
     width: int = 12,
     height: int = 12,
     max_steps: int = 256,
@@ -40,13 +52,14 @@ def simulate_episode(
 ) -> Episode:
     """Run one game with the teacher driving snake 0.
 
-    The teacher acts greedily (no exploration noise) so labels are clean; the
-    opponent uses epsilon-greedy so the learner sees varied states.
+    The teacher acts deterministically so labels are clean; the opponent uses
+    epsilon-greedy so the learner sees varied states.
     """
-    teacher = HeuristicPolicy(epsilon=0.0)
+    teacher = teacher or make_teacher()
     return simulate_dagger_episode(
         seed,
         lambda game, _history: teacher.choose(game, 0),
+        teacher=teacher,
         width=width,
         height=height,
         max_steps=max_steps,
@@ -58,6 +71,7 @@ def simulate_dagger_episode(
     seed: int,
     actor: Actor,
     *,
+    teacher: Policy | None = None,
     width: int = 12,
     height: int = 12,
     max_steps: int = 256,
@@ -66,7 +80,7 @@ def simulate_dagger_episode(
     """Run one game with ``actor`` driving snake 0; label each visited state
     with the teacher's action."""
     game = SnakeGame(width=width, height=height, seed=seed, max_steps=max_steps)
-    teacher = HeuristicPolicy(epsilon=0.0)
+    teacher = teacher or make_teacher()
     opponent = HeuristicPolicy(epsilon=epsilon, seed=seed + 1)
 
     feats: list[list[float]] = []
@@ -115,5 +129,5 @@ def build_dataset(
     **episode_kwargs,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Simulate ``n_episodes`` teacher games and pack them into windows."""
-    episodes = [simulate_episode(seed + ep, **episode_kwargs) for ep in range(n_episodes)]
+    episodes = [simulate_episode(seed + ep, **episode_kwargs) for ep in range(n_episodes)]  # noqa: E501
     return pack_windows(episodes, seq_len)

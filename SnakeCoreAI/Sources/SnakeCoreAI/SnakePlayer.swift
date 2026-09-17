@@ -18,11 +18,27 @@ public struct HeuristicPlayer: SnakePlayer {
     }
 }
 
+/// Adversarial-search player (the "stronger teacher"). Much harder to beat
+/// than `HeuristicPlayer`; also the fallback for snake A when CoreAI is
+/// unavailable.
+public struct MinimaxPlayer: SnakePlayer {
+    private var policy: MinimaxPolicy
+
+    public init(depth: Int = 2) {
+        policy = MinimaxPolicy(depth: depth)
+    }
+
+    public mutating func chooseAction(game: SnakeGame, snakeID: Int) async throws -> Direction {
+        policy.choose(game: game, snakeID: snakeID)
+    }
+}
+
 public enum ModelError: Error {
     case missingFunction(String)
     case missingOutput(String)
     case contextExhausted
     case coreAIUnavailable
+    case server(String)
 }
 
 /// Pick the action from 4 logits. With `safeOnly`, the best non-fatal move is

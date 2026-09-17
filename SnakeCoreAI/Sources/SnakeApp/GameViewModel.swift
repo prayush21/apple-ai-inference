@@ -3,6 +3,40 @@ import Observation
 import SnakeCoreAI
 import SnakeEngine
 
+/// Which policy drives snake A. Switchable from the UI so the three can be
+/// compared head-to-head on the same board.
+enum AIKind: String, CaseIterable, Identifiable {
+    case heuristic = "Heuristic"
+    case minimax = "Minimax"
+    case model = "Model · heuristic-taught"
+    case modelMinimaxTaught = "Model · minimax-taught"
+
+    var id: String { rawValue }
+
+    var blurb: String {
+        switch self {
+        case .heuristic: "greedy flood-fill, one move ahead; treats the opponent as static"
+        case .minimax: "4-ply adversarial search over Voronoi territory; the stronger teacher"
+        case .model: "converted transformer trained to imitate the heuristic (Core AI runtime, :8765)"
+        case .modelMinimaxTaught: "same transformer trained to imitate minimax (Core AI runtime, :8766)"
+        }
+    }
+
+    /// Port of the `python -m snake_ai.serve` instance for model kinds.
+    var serverPort: Int? {
+        switch self {
+        case .model: 8765
+        case .modelMinimaxTaught: 8766
+        default: nil
+        }
+    }
+}
+
+struct Scoreboard: Equatable {
+    var aiWins = 0, humanWins = 0, draws = 0
+    var games: Int { aiWins + humanWins + draws }
+}
+
 /// Drives the game loop. Snake 0 ("A") is the AI player, snake 1 ("B") is the
 /// human. The loop ticks on a fixed interval; the human's most recent arrow
 /// key is applied at the next tick, mirroring how the talk's app feeds the
@@ -17,7 +51,13 @@ final class GameViewModel {
     private(set) var aiLabel = "—"
     private(set) var lastInferenceMs: Double?
     private(set) var inferenceHistory: [Double] = []
+    private(set) var scores: [AIKind: Scoreboard] = [:]
     var tickInterval: Duration = .milliseconds(140)
+
+    /// Changing this restarts the game with the new opponent.
+    var aiKind: AIKind = .minimax {
+        didSet { if aiKind != oldValue, phase != .idle { start() } }
+    }
 
     private var humanDirection: Direction?
     private var aiPlayer: (any SnakePlayer)?
@@ -36,11 +76,13 @@ final class GameViewModel {
         lastInferenceMs = nil
         inferenceHistory = []
         phase = .loading
+        let kind = aiKind
         loop = Task { [weak self] in
             guard let self else { return }
-            await self.loadPlayer()
+            await self.loadPlayer(kind)
+            guard !Task.isCancelled else { return }
             self.phase = .running
-            await self.run()
+            await self.run(kind)
         }
     }
 
@@ -49,38 +91,62 @@ final class GameViewModel {
         phase = .idle
     }
 
-    // MARK: - Loop
+    // MARK: - Players
 
-    private func loadPlayer() async {
-        if aiPlayer == nil {
-            if let (url, function) = Self.locateModel() {
-                do {
-                    aiPlayer = try await ModelPlayer(modelURL: url, functionName: function)
-                    aiLabel = "Core AI · \(url.lastPathComponent)"
-                } catch ModelError.coreAIUnavailable {
-                    aiLabel = "heuristic (CoreAI.framework needs macOS 27)"
-                } catch {
-                    aiLabel = "heuristic (model failed: \(error))"
-                }
-            } else {
-                aiLabel = "heuristic (no .aimodel found; set SNAKE_MODEL)"
-            }
-            if aiPlayer == nil { aiPlayer = HeuristicPlayer(epsilon: 0, seed: seed) }
-        } else if aiPlayer is HeuristicPlayer {
+    private func loadPlayer(_ kind: AIKind) async {
+        switch kind {
+        case .heuristic:
             aiPlayer = HeuristicPlayer(epsilon: 0, seed: seed)
-        } else if let (url, function) = Self.locateModel(),
-                  let fresh = try? await ModelPlayer(modelURL: url, functionName: function) {
-            // A stateful model player owns KV caches: start each game with fresh ones.
-            aiPlayer = fresh
+            aiLabel = "heuristic"
+        case .minimax:
+            aiPlayer = MinimaxPlayer(depth: 2)
+            aiLabel = "minimax (depth 2)"
+        case .model, .modelMinimaxTaught:
+            let (player, label) = await loadModelPlayer(port: kind.serverPort!)
+            aiPlayer = player
+            aiLabel = label
         }
     }
 
-    private func run() async {
+    /// Prefer the in-process CoreAI.framework player (macOS 27+); otherwise the
+    /// same asset served by `python -m snake_ai.serve`. If neither is
+    /// available, play minimax and say so in the HUD.
+    private func loadModelPlayer(port: Int) async -> (any SnakePlayer, String) {
+        var reasons: [String] = []
+        if port == 8765, let (url, function) = Self.locateModel() {
+            do {
+                let p = try await ModelPlayer(modelURL: url, functionName: function)
+                return (p, "Core AI · \(url.lastPathComponent) (in-process)")
+            } catch ModelError.coreAIUnavailable {
+                reasons.append("CoreAI.framework needs macOS 27")
+            } catch {
+                reasons.append("in-process load failed: \(error)")
+            }
+        } else if port == 8765 {
+            reasons.append("no .aimodel found")
+        }
+        do {
+            let p = try await RemoteModelPlayer(baseURL: URL(string: "http://127.0.0.1:\(port)")!)
+            let tag = p.info.tag.isEmpty ? "" : " [\(p.info.tag)]"
+            return (p, "Core AI · \(p.info.asset)\(tag) via Python runtime :\(port)")
+        } catch {
+            reasons.append("no model server on :\(port) — run: python -m snake_ai.serve --port \(port)")
+        }
+        return (MinimaxPlayer(depth: 2), "minimax fallback — " + reasons.joined(separator: "; "))
+    }
+
+    // MARK: - Loop
+
+    private func run(_ kind: AIKind) async {
         while !Task.isCancelled && !game.isOver {
             var actions: [Int: Direction] = [:]
             if game.snakes[0].alive, var p = aiPlayer {
                 let t0 = ContinuousClock.now
-                if let d = try? await p.chooseAction(game: game, snakeID: 0) { actions[0] = d }
+                do {
+                    actions[0] = try await p.chooseAction(game: game, snakeID: 0)
+                } catch {
+                    aiLabel = "AI error: \(error)"
+                }
                 let ms = Double((ContinuousClock.now - t0).components.attoseconds) / 1e15
                 lastInferenceMs = ms
                 inferenceHistory.append(ms)
@@ -91,11 +157,17 @@ final class GameViewModel {
             try? await Task.sleep(for: tickInterval)
         }
         guard !Task.isCancelled else { return }
+        var board = scores[kind, default: Scoreboard()]
         switch game.winner {
-        case 0: phase = .over("AI wins")
-        case 1: phase = .over("You win!")
-        default: phase = .over("Draw")
+        case 0: board.aiWins += 1; phase = .over("AI wins")
+        case 1: board.humanWins += 1; phase = .over("You win!")
+        default: board.draws += 1; phase = .over("Draw")
         }
+        scores[kind] = board
+    }
+
+    var averageInferenceMs: Double? {
+        inferenceHistory.isEmpty ? nil : inferenceHistory.reduce(0, +) / Double(inferenceHistory.count)
     }
 
     // MARK: - Model discovery

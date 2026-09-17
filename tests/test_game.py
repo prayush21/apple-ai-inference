@@ -65,3 +65,27 @@ def test_dagger_episode_labels_with_teacher():
     f2, a2 = simulate_episode(0)
     X, Y, M = pack_windows([(f, a), (f2, a2)], seq_len=16)
     assert X.shape[1:] == (16, FEATURE_DIM) and M.sum() == len(a) + len(a2)
+
+
+def test_minimax_avoids_immediate_traps_and_beats_heuristic():
+    from snake_ai.minimax import MinimaxPolicy, evaluate, EvalWeights, voronoi
+
+    g = SnakeGame(seed=0)
+    mine, theirs = voronoi(g, 0)
+    assert mine == theirs  # symmetric start
+    # Territory and length terms are antisymmetric; only the "be near food"
+    # bonus is not, so with food removed the scores must mirror.
+    g.food = (-1, -1)
+    w = EvalWeights(food=0.0)
+    assert evaluate(g, 0, w) == -evaluate(g, 1, w)
+
+    wins = 0
+    for seed in range(6):
+        g = SnakeGame(seed=seed, max_steps=200)
+        a, b = MinimaxPolicy(depth=1), HeuristicPolicy(epsilon=0.05, seed=seed)
+        while not g.is_over:
+            d = a.choose(g, 0)
+            assert g.is_safe(0, d) or not any(g.is_safe(0, x) for x in Direction)
+            g.step({0: d, 1: b.choose(g, 1)})
+        wins += g.winner == 0
+    assert wins >= 4

@@ -227,6 +227,19 @@ class SnakeGame:
 
         self.step_count += 1
 
+    # ------------------------------------------------------------ lookahead
+    def clone(self) -> "SnakeGame":
+        """Cheap copy for search. Food respawns in the copy use a fresh RNG
+        seeded from the step count, so lookahead is deterministic without
+        disturbing the real game's RNG."""
+        g = object.__new__(SnakeGame)
+        g.width, g.height, g.seed = self.width, self.height, self.seed
+        g.initial_length, g.max_steps = self.initial_length, self.max_steps
+        g.snakes = [Snake(body=list(s.body), direction=s.direction, alive=s.alive) for s in self.snakes]
+        g.food, g.step_count = self.food, self.step_count
+        g.rng = random.Random(self.step_count)
+        return g
+
     # --------------------------------------------------------------- display
     def render(self) -> str:
         """ASCII board: ``A``/``a`` snake 0 head/body, ``B``/``b`` snake 1, ``*`` food."""

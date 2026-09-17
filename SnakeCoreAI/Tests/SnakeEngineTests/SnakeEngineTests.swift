@@ -72,3 +72,27 @@ private struct FixtureCase: Decodable {
         }
     }
 }
+
+// MARK: - Minimax teacher
+
+@Test func minimaxBeatsHeuristic() {
+    var wins = 0
+    for seed in 0..<12 {
+        var g = SnakeGame(seed: UInt64(seed), maxSteps: 300)
+        var a = MinimaxPolicy(depth: 1)
+        var b = HeuristicPolicy(epsilon: 0.05, seed: UInt64(seed))
+        while !g.isOver {
+            let d = a.choose(game: g, snakeID: 0)
+            #expect(g.isSafe(0, d) || !Direction.allCases.contains { g.isSafe(0, $0) })
+            g.step([0: d, 1: b.choose(game: g, snakeID: 1)])
+        }
+        if g.winner == 0 { wins += 1 }
+    }
+    #expect(wins >= 9, "minimax won only \(wins)/12")
+}
+
+@Test func voronoiIsSymmetricAtStart() {
+    let g = SnakeGame(seed: 0)
+    let (mine, theirs) = MinimaxPolicy.voronoi(g, me: 0)
+    #expect(mine == theirs)
+}

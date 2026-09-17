@@ -20,7 +20,9 @@ PyTorch model ──torch.export──▶ coreai-torch ──▶ .aimodel ──
 |---|---|
 | `snake_ai/game.py` | Two-snake game engine (rules, collisions, ASCII render) |
 | `snake_ai/features.py` | The 16-dim per-step feature vector from the talk |
-| `snake_ai/policy.py` | Flood-fill heuristic — training-data generator and opponent |
+| `snake_ai/policy.py` | Flood-fill heuristic — the original teacher and the evaluation opponent |
+| `snake_ai/minimax.py` | Stronger teacher: alpha-beta search over Voronoi territory (94–100% vs the heuristic) |
+| `snake_ai/serve.py` | Serves an `.aimodel` over local HTTP through the Core AI Python runtime, so the Swift app can use the model before macOS 27 |
 | `snake_ai/model.py` | `SnakeTransformer` (stateless) and `SnakeTransformerStateful` (KV-cache buffers → Core AI states) |
 | `snake_ai/train.py` | Behaviour cloning + optional DAgger rounds → `checkpoints/snake.pt` |
 | `snake_ai/evaluate.py` | Win rate vs the heuristic (the metric that matters; val accuracy alone misleads) |
@@ -29,7 +31,7 @@ PyTorch model ──torch.export──▶ coreai-torch ──▶ .aimodel ──
 | `snake_ai/play.py` | Python `ModelPlayer`s driving snake 0 through the Core AI runtime, with latency stats |
 | `snake_ai/debug.py` | Python versions of the Core AI Instrument / Debugger: per-op timings mapped to source lines, op-by-op numerics diff, raw profiler events |
 | `snake_ai/specialize.py` | Specialization cache + `SpecializationOptions` demo (cold vs warm load) |
-| `SnakeCoreAI/` | Swift package: `SnakeEngine` (1:1 port of the engine), `SnakeCoreAI` (`ModelPlayer` on `CoreAI.framework`), `snake-cli`, `SnakeApp` (SwiftUI) |
+| `SnakeCoreAI/` | Swift package: `SnakeEngine` (1:1 port of engine, heuristic, minimax), `SnakeCoreAI` (`ModelPlayer` on `CoreAI.framework`, `RemoteModelPlayer` via `serve.py`), `snake-cli`, `SnakeApp` (SwiftUI) |
 | `docs/coreai-ecosystem.md` | Notes on the Core AI ecosystem and the gotchas we hit |
 
 ## Quick start (Python side — runs today on macOS 26)
@@ -110,11 +112,38 @@ test that proves the Swift `FeatureExtractor` matches the Python one bit-for-bit
 app fall back to the heuristic and say so.
 
 ```bash
+.venv/bin/python -m snake_ai.serve                                                          # heuristic-taught model on :8765
+```
+
+```bash
+.venv/bin/python -m snake_ai.serve --models-dir models/minimax_teacher --port 8766 --tag minimax-taught
+```
+
+```bash
 cd SnakeCoreAI && swift run SnakeApp        # arrow keys steer snake B; space / Start begins a game
 ```
 
-The app looks for `models/SnakeTransformerDecode.aimodel` (then `…Stateful`)
-above the working directory, or `SNAKE_MODEL` / `SNAKE_MODEL_FUNCTION`.
+The picker at the top switches snake A between **Heuristic**, **Minimax**, and
+the two Core AI models (each served by a `snake_ai.serve` instance). A
+per-opponent scoreboard and avg ms/move make the differences measurable. On
+macOS 27 the model options load in-process via `CoreAI.framework` (it looks for
+`models/SnakeTransformerDecode.aimodel` above the working directory, or
+`SNAKE_MODEL` / `SNAKE_MODEL_FUNCTION`).
+
+### Teachers and students
+
+| player | vs greedy heuristic, 100 games |
+|---|---|
+| greedy heuristic (mirror) | 51% |
+| minimax depth 1 / depth 2 | 94% / 100% |
+| model, heuristic-taught (+3 DAgger) | 31% |
+| model, minimax-taught (+2 DAgger) | 30% — dies less, times out more |
+
+The 3x stronger teacher did not move the student's win rate: it decides on
+Voronoi territory and body positions, which the talk's 16 distance features
+cannot express. The next lever is richer input (board occupancy planes), not
+model size or teacher quality. Train the minimax-taught student with
+`python -m snake_ai.train --teacher minimax --dagger-rounds 2`.
 
 ## Status
 
