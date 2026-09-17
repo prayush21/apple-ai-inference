@@ -63,6 +63,37 @@ program.save_asset(Path("X.aimodel"))
 
 6. **Stateful is not free.** Attention always runs over the full fixed-size cache (256 slots here), so the per-call cost is a constant ~2x the stateless cost at T=1 — but it is flat, whereas stateless grows with T. For a 256-move game the crossover is around T≈20.
 
+7. **Dynamic shapes cost type inference on every call.** The raw `Profiler` events for one call show `Function Type Inference` at ~3.8 ms of ~20 ms total. `AIProgram.set_static_shape_config("main", {"decode": {"features": (1,1,16), "position_ids": (1,1)}})` before `optimize()` attaches `coreai.enumerated_shapes` and emits a fully static `main_decode` function (the dynamic `main` is dropped). Per-step decode went 4.65 → 3.83 ms. This is the Python side of the talk's "check the optimal memory layout / pre-allocate outputs" tight-loop advice.
+
+8. **`set_static_shape_config` renames the function.** The new entrypoint is `<graph>_<config name>`; `load_function("main")` then fails with `KeyError`. Always read `model.function_names`.
+
+## Profiling and debugging from Python
+
+| Xcode 27 tool | Python equivalent | Where |
+|---|---|---|
+| Core AI Instrument (per-inference / per-op intervals) | `coreai.runtime.Profiler(on_log_event_begin/end)` passed to `load_function(..., profiler=)` | `snake_ai.debug events` |
+| Instrument's per-op table | `coreai_torch.debugging.benchmarker.benchmark_coreai_program(program, inputs, num_runs)` → `BenchmarkResult.write_summary`, `get_module_timings()` | `snake_ai.debug benchmark` |
+| Debugger's "trace back to Python source" | `ModuleTiming.annotate_dominant_source(file)` writes the authoring `.py` with each line annotated by the ops it produced and their timings (needs `TorchConverter(mode=DEBUG)`, the default) | `snake_ai.debug benchmark` → `models/SnakeTransformer.annotated.py.txt` |
+| Debugger's intermediate tensor inspection | `coreai.runtime.IntermediateLogger` + `coreai_torch.debugging.comparator.create_comparator_for_programs(exported, program, "main")` → `compare_with_tolerance(inputs)` bisects op-by-op | `snake_ai.debug compare` |
+| Debug gauge | — (`Profiler` events are the same data) | |
+
+Observed: the stateless snake model compares 108 op pairs pass / 0 fail (55 "unknown" are torch views/permutes with no Core AI op). Per-op time is dominated by `reshape`/`transpose`/`concat` glue (~50%), not matmuls — the model is too small for compute to matter.
+
+## Specialization and caching from Python
+
+- First `AIModel.load` of an asset specializes it (~140 ms for this model) and writes the artifacts to `~/Library/Caches/coreai-cache/<OS build>/<program hash>`; later loads take <1 ms. That directory is the Python-side analogue of Swift's `AIModelCache.default`.
+- `SpecializationOptions.cpu_only()/default()/from_preferred_compute_unit_kind(ComputeUnitKind.gpu())/.with_debug(enabled=True)` are accepted, but `SpecializationOptions.is_supported()` is False on the in-package runtime: compute-unit delegation (GPU / Neural Engine) needs the OS `CoreAI.framework` (`USE_OS_COREAI` on macOS 27).
+- `.aimodelc` ahead-of-time compilation is an Xcode 27 toolchain feature; nothing in the Python packages produces it.
+
+## Model-side lessons
+
+- Validation accuracy is a poor proxy for the snake actually surviving. Measured on 100 fresh games vs the heuristic (±5%): baseline cloning 27%; 2.7x more data 25%; a 5x bigger model (73% val acc vs 66%) **17%**; three DAgger rounds 31%. The bigger model imitates the teacher better on teacher-visited states and fails harder on its own (covariate shift); DAgger (`train.py --dagger-rounds`) helps modestly. Small-sample evals mislead — 30-game runs of the same checkpoints read 47–50%.
+- The remaining gap is information, not capacity: the teacher's flood-fill sees the whole board, while the talk's 16 features carry no body occupancy. Closing it means adding features (a deliberate departure from the session's model), not a bigger transformer.
+
+- Author with plain tensor ops (explicit softmax attention, `register_buffer` caches, `copy_` at the end of `forward`). The graph is easy to read in MLIR and every op has a lowering.
+- Keep the stateless and stateful modules sharing one parameter set (subclass + `load_state_dict(strict=False)`) and unit-test their equivalence token-by-token *before* converting; it separates authoring bugs from conversion bugs.
+- Verify numerics on real game inputs, not `randn`, and thread a real multi-step decode through the states — a single-call check would not have caught a broken cache write.
+
 ## Runtime API cheat-sheet (Python ↔ Swift)
 
 | Python (`coreai.runtime`) | Swift (`CoreAI`) |
@@ -75,9 +106,3 @@ program.save_asset(Path("X.aimodel"))
 | `AIModel.load(path, SpecializationOptions(...))` | `AIModel.specialize(contentsOf:)`, `AIModelCache.default.model(for:options:)` |
 | `model.load_function(name, profiler=Profiler())` | Core AI Instrument / debug gauge |
 | `model.load_function(name, intermediate_logger=IntermediateLogger())` | Core AI Debugger |
-
-## Model-side lessons
-
-- Author with plain tensor ops (explicit softmax attention, `register_buffer` caches, `copy_` at the end of `forward`). The graph is easy to read in MLIR and every op has a lowering.
-- Keep the stateless and stateful modules sharing one parameter set (subclass + `load_state_dict(strict=False)`) and unit-test their equivalence token-by-token *before* converting; it separates authoring bugs from conversion bugs.
-- Verify numerics on real game inputs, not `randn`, and thread a real multi-step decode through the states — a single-call check would not have caught a broken cache write.

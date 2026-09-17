@@ -50,3 +50,18 @@ def test_heuristic_survives_a_while():
     while not g.is_over:
         g.step({0: p.choose(g, 0), 1: p.choose(g, 1)})
     assert g.step_count > 10
+
+
+def test_dagger_episode_labels_with_teacher():
+    from snake_ai.data import pack_windows, simulate_dagger_episode, simulate_episode
+
+    # A learner that always goes UP dies fast; every visited state is still
+    # labelled by the teacher, so labels are valid actions and lengths match.
+    f, a = simulate_dagger_episode(0, lambda game, history: Direction.UP)
+    assert f.shape == (len(a), FEATURE_DIM) and 0 < len(a) <= 8
+    assert set(a.tolist()) <= {0, 1, 2, 3}
+
+    # Teacher-driven episodes are the same function with the teacher as actor.
+    f2, a2 = simulate_episode(0)
+    X, Y, M = pack_windows([(f, a), (f2, a2)], seq_len=16)
+    assert X.shape[1:] == (16, FEATURE_DIM) and M.sum() == len(a) + len(a2)

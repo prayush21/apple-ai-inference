@@ -13,7 +13,7 @@ Per-inference latency is recorded so the difference is visible without
 Instruments.
 
     python -m snake_ai.play --player stateful --render
-    python -m snake_ai.play --player both --games 5      # latency comparison
+    python -m snake_ai.play --player all --games 5       # latency comparison
 """
 
 from __future__ import annotations
@@ -63,6 +63,9 @@ class StatelessModelPlayer:
 
 
 class StatefulModelPlayer:
+    """Works for both the dynamic (``main``) and static-shape (``main_decode``)
+    stateful assets: the call shape is always [1, 1, 16] / [1, 1]."""
+
     def __init__(self, function: InferenceFunction, *, safe_only: bool = True) -> None:
         self.function = function
         self.safe_only = safe_only
@@ -96,6 +99,9 @@ async def load_player(kind: str, models_dir: Path, *, safe_only: bool):
     if kind == "stateless":
         model = await AIModel.load(models_dir / "SnakeTransformer.aimodel")
         return StatelessModelPlayer(model.load_function("main"), safe_only=safe_only)
+    if kind == "decode":
+        model = await AIModel.load(models_dir / "SnakeTransformerDecode.aimodel")
+        return StatefulModelPlayer(model.load_function("main_decode"), safe_only=safe_only)
     model = await AIModel.load(models_dir / "SnakeTransformerStateful.aimodel")
     return StatefulModelPlayer(model.load_function("main"), safe_only=safe_only)
 
@@ -136,7 +142,7 @@ def summarize(label: str, games: list[SnakeGame], latencies: list[list[float]]) 
 
 
 async def run(a: argparse.Namespace) -> None:
-    kinds = ["stateless", "stateful"] if a.player == "both" else [a.player]
+    kinds = ["stateless", "stateful", "decode"] if a.player == "all" else [a.player]
     for kind in kinds:
         games, lats = [], []
         for i in range(a.games):
@@ -151,7 +157,7 @@ async def run(a: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--player", choices=["stateless", "stateful", "both"], default="stateful")
+    ap.add_argument("--player", choices=["stateless", "stateful", "decode", "all"], default="decode")
     ap.add_argument("--models-dir", type=Path, default=Path("models"))
     ap.add_argument("--games", type=int, default=1)
     ap.add_argument("--seed", type=int, default=100)

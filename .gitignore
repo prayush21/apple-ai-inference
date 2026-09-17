@@ -10,3 +10,4 @@ data/
 *.xcodeproj
 .DS_Store
 *.egg-info/
+models/*.txt

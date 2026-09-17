@@ -1,6 +1,11 @@
 """Train ``SnakeTransformer`` by imitating the heuristic policy.
 
-    python -m snake_ai.train --episodes 2000 --epochs 8 --out checkpoints/snake.pt
+Stage 1 is plain behaviour cloning on teacher rollouts. Optional DAgger rounds
+then roll out the *learner*, label what it sees with the teacher, aggregate,
+and keep training — this is what turns "imitates the teacher 66% of the time"
+into "actually survives".
+
+    python -m snake_ai.train --episodes 4000 --epochs 10 --dagger-rounds 4
 """
 
 from __future__ import annotations
@@ -13,38 +18,26 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .data import build_dataset
+from .data import Episode, pack_windows, simulate_dagger_episode, simulate_episode
+from .evaluate import choose_with_model, evaluate
 from .model import SnakeModelConfig, SnakeTransformer
 
 
-def train(
-    *,
-    episodes: int,
-    epochs: int,
-    seq_len: int,
-    batch_size: int,
-    lr: float,
-    out: Path,
-    seed: int = 0,
-    cfg: SnakeModelConfig | None = None,
-) -> SnakeTransformer:
-    torch.manual_seed(seed)
-    cfg = cfg or SnakeModelConfig()
-    assert seq_len <= cfg.max_seq_len
-
-    t0 = time.time()
-    X, Y, M = build_dataset(episodes, seq_len=seq_len, seed=seed)
-    print(f"dataset: {X.shape[0]} windows x {seq_len} steps ({M.sum():.0f} labelled steps) in {time.time() - t0:.1f}s")
-
-    # Hold out 10% of windows for validation.
-    n_val = max(1, len(X) // 10)
+def _split(X, Y, M, seed: int, val_frac: float = 0.1):
+    n_val = max(1, int(len(X) * val_frac))
     perm = np.random.default_rng(seed).permutation(len(X))
-    val_idx, tr_idx = perm[:n_val], perm[n_val:]
-    X, Y, M = (torch.from_numpy(a) for a in (X, Y, M))
-    Xv, Yv, Mv = X[val_idx], Y[val_idx], M[val_idx]
-    Xt, Yt, Mt = X[tr_idx], Y[tr_idx], M[tr_idx]
+    t = lambda a: torch.from_numpy(a)
+    v, tr = perm[:n_val], perm[n_val:]
+    return (t(X[tr]), t(Y[tr]), t(M[tr])), (t(X[v]), t(Y[v]), t(M[v]))
 
-    model = SnakeTransformer(cfg)
+
+def fit(model: SnakeTransformer, episodes: list[Episode], *, seq_len: int, epochs: int, batch_size: int, lr: float, seed: int, tag: str = "") -> None:
+    """Train ``model`` in place on ``episodes`` for ``epochs``."""
+    cfg = model.cfg
+    X, Y, M = pack_windows(episodes, seq_len)
+    (Xt, Yt, Mt), (Xv, Yv, Mv) = _split(X, Y, M, seed)
+    print(f"{tag}dataset: {len(episodes)} episodes -> {len(X)} windows x {seq_len} ({int(M.sum())} labelled steps)")
+
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
@@ -75,9 +68,61 @@ def train(
         with torch.no_grad():
             vloss, vacc = masked_loss_acc(model(Xv), Yv, Mv)
         print(
-            f"epoch {epoch:2d}  train loss {tot_loss / n_batches:.3f} acc {tot_acc / n_batches:.3f}"
+            f"{tag}epoch {epoch:2d}  train loss {tot_loss / n_batches:.3f} acc {tot_acc / n_batches:.3f}"
             f"  |  val loss {vloss:.3f} acc {vacc:.3f}"
         )
+
+
+def model_actor(model: SnakeTransformer):
+    """Wrap the model as a DAgger actor (uses the same safe-argmax as play)."""
+    def act(game, history):
+        return choose_with_model(model, history[-model.cfg.max_seq_len :], game, 0, safe_only=True)
+    return act
+
+
+def train(
+    *,
+    episodes: int,
+    epochs: int,
+    seq_len: int,
+    batch_size: int,
+    lr: float,
+    out: Path,
+    seed: int = 0,
+    cfg: SnakeModelConfig | None = None,
+    eval_games: int = 30,
+    dagger_rounds: int = 0,
+    dagger_games: int = 300,
+    dagger_epochs: int = 4,
+) -> SnakeTransformer:
+    torch.manual_seed(seed)
+    cfg = cfg or SnakeModelConfig()
+    assert seq_len <= cfg.max_seq_len
+    model = SnakeTransformer(cfg)
+    print(f"model: {sum(p.numel() for p in model.parameters()):,} params  {cfg}")
+
+    # Stage 1: behaviour cloning on teacher rollouts.
+    t0 = time.time()
+    data: list[Episode] = [simulate_episode(seed + ep) for ep in range(episodes)]
+    print(f"simulated {episodes} teacher episodes in {time.time() - t0:.1f}s")
+    fit(model, data, seq_len=seq_len, epochs=epochs, batch_size=batch_size, lr=lr, seed=seed)
+    if eval_games:
+        print("after cloning, vs heuristic:", evaluate(model, games=eval_games))
+
+    # Stage 2: DAgger — aggregate learner-visited states with teacher labels.
+    next_seed = seed + episodes
+    for r in range(1, dagger_rounds + 1):
+        t0 = time.time()
+        actor = model_actor(model)
+        new = [simulate_dagger_episode(next_seed + i, actor) for i in range(dagger_games)]
+        next_seed += dagger_games
+        data.extend(new)
+        print(f"[dagger {r}] rolled out {dagger_games} learner episodes "
+              f"(avg {np.mean([len(a) for _, a in new]):.0f} steps) in {time.time() - t0:.1f}s")
+        fit(model, data, seq_len=seq_len, epochs=dagger_epochs, batch_size=batch_size, lr=lr * 0.5,
+            seed=seed + r, tag=f"[dagger {r}] ")
+        if eval_games:
+            print(f"[dagger {r}] vs heuristic:", evaluate(model, games=eval_games))
 
     out.parent.mkdir(parents=True, exist_ok=True)
     model.save_checkpoint(out)
@@ -86,7 +131,7 @@ def train(
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--episodes", type=int, default=2000)
     ap.add_argument("--epochs", type=int, default=8)
     ap.add_argument("--seq-len", type=int, default=64)
@@ -94,8 +139,17 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--out", type=Path, default=Path("checkpoints/snake.pt"))
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--d-model", type=int, default=64)
+    ap.add_argument("--n-layers", type=int, default=2)
+    ap.add_argument("--n-heads", type=int, default=4)
+    ap.add_argument("--eval-games", type=int, default=30)
+    ap.add_argument("--dagger-rounds", type=int, default=0)
+    ap.add_argument("--dagger-games", type=int, default=300)
+    ap.add_argument("--dagger-epochs", type=int, default=4)
     a = ap.parse_args(argv)
     train(
+        cfg=SnakeModelConfig(d_model=a.d_model, n_layers=a.n_layers, n_heads=a.n_heads),
+        eval_games=a.eval_games,
         episodes=a.episodes,
         epochs=a.epochs,
         seq_len=a.seq_len,
@@ -103,6 +157,9 @@ def main(argv: list[str] | None = None) -> None:
         lr=a.lr,
         out=a.out,
         seed=a.seed,
+        dagger_rounds=a.dagger_rounds,
+        dagger_games=a.dagger_games,
+        dagger_epochs=a.dagger_epochs,
     )
 
 

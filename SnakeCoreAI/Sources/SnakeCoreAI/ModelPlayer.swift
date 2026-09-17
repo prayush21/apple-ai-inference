@@ -42,10 +42,12 @@ public struct StatelessModelPlayer: SnakePlayer {
 
 // MARK: - Stateful player (KV-cache states)
 
-/// Runs `SnakeTransformerStateful.aimodel`. The key/value caches are NDArrays
-/// owned by the player and passed as *states*: the runtime reads and updates
-/// them in place, so each move only sends the newest board features and its
-/// position. Latency stays flat for the whole game.
+/// Runs `SnakeTransformerStateful.aimodel` (function `main`, dynamic step
+/// count) or `SnakeTransformerDecode.aimodel` (function `main_decode`, inputs
+/// pinned to one step — skips per-call type inference). The key/value caches
+/// are NDArrays owned by the player and passed as *states*: the runtime reads
+/// and updates them in place, so each move only sends the newest board
+/// features and its position. Latency stays flat for the whole game.
 @available(macOS 27, iOS 27, *)
 public struct ModelPlayer: SnakePlayer {
     let nextActionFunction: InferenceFunction
@@ -55,10 +57,10 @@ public struct ModelPlayer: SnakePlayer {
     private let maxContext: Int
     private var position = 0
 
-    public init(modelURL: URL) async throws {
+    public init(modelURL: URL, functionName: String = "main") async throws {
         let model = try await AIModel(contentsOf: modelURL)
-        guard let function = try model.loadFunction(named: "main") else {
-            throw ModelError.missingFunction("main")
+        guard let function = try model.loadFunction(named: functionName) else {
+            throw ModelError.missingFunction(functionName)
         }
         self.nextActionFunction = function
 
@@ -153,7 +155,7 @@ extension NDArray.View {
 // public surface so the CLI compiles; it fails at runtime with a clear error.
 
 public struct ModelPlayer: SnakePlayer {
-    public init(modelURL: URL) async throws { throw ModelError.coreAIUnavailable }
+    public init(modelURL: URL, functionName: String = "main") async throws { throw ModelError.coreAIUnavailable }
     public mutating func chooseAction(game: SnakeGame, snakeID: Int) async throws -> Direction {
         throw ModelError.coreAIUnavailable
     }

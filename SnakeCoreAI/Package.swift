@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "SnakeEngine", targets: ["SnakeEngine"]),
         .library(name: "SnakeCoreAI", targets: ["SnakeCoreAI"]),
         .executable(name: "snake-cli", targets: ["snake-cli"]),
+        .executable(name: "SnakeApp", targets: ["SnakeApp"]),
     ],
     targets: [
         // Pure-Swift game rules + feature extraction. Mirrors snake_ai/game.py
@@ -19,6 +20,10 @@ let package = Package(
         .target(name: "SnakeCoreAI", dependencies: ["SnakeEngine"]),
 
         .executableTarget(name: "snake-cli", dependencies: ["SnakeEngine", "SnakeCoreAI"]),
+
+        // SwiftUI game: arrow keys drive snake B, the model (or heuristic
+        // fallback) drives snake A.
+        .executableTarget(name: "SnakeApp", dependencies: ["SnakeEngine", "SnakeCoreAI"]),
 
         .testTarget(
             name: "SnakeEngineTests",
