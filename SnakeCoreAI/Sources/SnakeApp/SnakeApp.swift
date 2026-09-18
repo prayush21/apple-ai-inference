@@ -66,7 +66,7 @@ struct ContentView: View {
             ForEach(AIKind.allCases) { kind in
                 let s = vm.scores[kind] ?? Scoreboard()
                 HStack(spacing: 4) {
-                    Text(kind.rawValue.replacingOccurrences(of: "Model · ", with: ""))
+                    Text(kind.rawValue)
                         .fontWeight(kind == vm.aiKind ? .semibold : .regular)
                     Text("AI \(s.aiWins) · you \(s.humanWins)\(s.draws > 0 ? " · draw \(s.draws)" : "")")
                         .monospacedDigit()

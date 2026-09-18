@@ -98,7 +98,13 @@ def train(
     teacher_depth: int = 1,
 ) -> SnakeTransformer:
     torch.manual_seed(seed)
-    teacher_policy = make_teacher(teacher, teacher_depth)
+    # "mixed" alternates whole episodes between the two teachers (per-step
+    # mixing would give inconsistent labels within one trajectory).
+    if teacher == "mixed":
+        teachers = [make_teacher("heuristic"), make_teacher("minimax", teacher_depth)]
+    else:
+        teachers = [make_teacher(teacher, teacher_depth)]
+    teacher_for = lambda i: teachers[i % len(teachers)]
     cfg = cfg or SnakeModelConfig()
     assert seq_len <= cfg.max_seq_len
     model = SnakeTransformer(cfg)
@@ -106,7 +112,7 @@ def train(
 
     # Stage 1: behaviour cloning on teacher rollouts.
     t0 = time.time()
-    data: list[Episode] = [simulate_episode(seed + ep, teacher=teacher_policy) for ep in range(episodes)]
+    data: list[Episode] = [simulate_episode(seed + ep, teacher=teacher_for(ep)) for ep in range(episodes)]
     print(f"simulated {episodes} episodes with teacher={teacher} in {time.time() - t0:.1f}s")
     fit(model, data, seq_len=seq_len, epochs=epochs, batch_size=batch_size, lr=lr, seed=seed)
     if eval_games:
@@ -117,7 +123,7 @@ def train(
     for r in range(1, dagger_rounds + 1):
         t0 = time.time()
         actor = model_actor(model)
-        new = [simulate_dagger_episode(next_seed + i, actor, teacher=teacher_policy) for i in range(dagger_games)]
+        new = [simulate_dagger_episode(next_seed + i, actor, teacher=teacher_for(i)) for i in range(dagger_games)]
         next_seed += dagger_games
         data.extend(new)
         print(f"[dagger {r}] rolled out {dagger_games} learner episodes "
@@ -149,7 +155,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--dagger-rounds", type=int, default=0)
     ap.add_argument("--dagger-games", type=int, default=300)
     ap.add_argument("--dagger-epochs", type=int, default=4)
-    ap.add_argument("--teacher", choices=["heuristic", "minimax"], default="heuristic")
+    ap.add_argument("--teacher", choices=["heuristic", "minimax", "mixed"], default="heuristic")
     ap.add_argument("--teacher-depth", type=int, default=1, help="minimax lookahead in own moves")
     a = ap.parse_args(argv)
     train(

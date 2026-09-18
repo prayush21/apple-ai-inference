@@ -30,6 +30,11 @@ class EvalResult:
     draws: int
     mean_steps: float
     mean_length: float
+    # How the games ended, from the model's side.
+    deaths: int = 0            # losses where the model died
+    timeout_losses: int = 0    # losses on length at the step limit
+    kills: int = 0             # wins because the opponent died
+    timeout_wins: int = 0      # wins on length at the step limit
 
     @property
     def win_rate(self) -> float:
@@ -38,7 +43,9 @@ class EvalResult:
     def __str__(self) -> str:
         return (
             f"win rate {self.win_rate:.0%} ({self.wins}W/{self.losses}L/{self.draws}D over {self.games}), "
-            f"avg steps {self.mean_steps:.0f}, avg model length {self.mean_length:.1f}"
+            f"avg steps {self.mean_steps:.0f}, avg model length {self.mean_length:.1f} | "
+            f"deaths {self.deaths}, timeout losses {self.timeout_losses}, "
+            f"kills {self.kills}, timeout wins {self.timeout_wins}"
         )
 
 
@@ -56,6 +63,7 @@ def choose_with_model(model: SnakeTransformer, history: list[list[float]], game:
 def evaluate(model: SnakeTransformer, *, games: int, seed: int = 1000, max_steps: int = 250, safe_only: bool = True, opponent_epsilon: float = 0.05) -> EvalResult:
     model.eval()
     wins = losses = draws = 0
+    deaths = timeout_losses = kills = timeout_wins = 0
     steps, lengths = [], []
     for g in range(games):
         game = SnakeGame(seed=seed + g, max_steps=max_steps)
@@ -71,13 +79,24 @@ def evaluate(model: SnakeTransformer, *, games: int, seed: int = 1000, max_steps
             game.step(actions)
         if game.winner == 0:
             wins += 1
+            if game.snakes[1].alive:
+                timeout_wins += 1
+            else:
+                kills += 1
         elif game.winner == 1:
             losses += 1
+            if game.snakes[0].alive:
+                timeout_losses += 1
+            else:
+                deaths += 1
         else:
             draws += 1
         steps.append(game.step_count)
         lengths.append(len(game.snakes[0]))
-    return EvalResult(games, wins, losses, draws, float(np.mean(steps)), float(np.mean(lengths)))
+    return EvalResult(
+        games, wins, losses, draws, float(np.mean(steps)), float(np.mean(lengths)),
+        deaths=deaths, timeout_losses=timeout_losses, kills=kills, timeout_wins=timeout_wins,
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -85,9 +104,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--checkpoint", type=Path, default=Path("checkpoints/snake.pt"))
     ap.add_argument("--games", type=int, default=50)
     ap.add_argument("--raw", action="store_true", help="take the raw argmax even if fatal")
+    ap.add_argument("--seed", type=int, default=1000)
     a = ap.parse_args(argv)
     model = SnakeTransformer.load_checkpoint(a.checkpoint)
-    print(evaluate(model, games=a.games, safe_only=not a.raw))
+    print(f"{a.checkpoint}: {evaluate(model, games=a.games, seed=a.seed, safe_only=not a.raw)}")
 
 
 if __name__ == "__main__":

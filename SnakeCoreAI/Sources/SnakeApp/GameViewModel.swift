@@ -8,8 +8,9 @@ import SnakeEngine
 enum AIKind: String, CaseIterable, Identifiable {
     case heuristic = "Heuristic"
     case minimax = "Minimax"
-    case model = "Model · heuristic-taught"
-    case modelMinimaxTaught = "Model · minimax-taught"
+    case model = "Model (heur)"
+    case modelMinimaxTaught = "Model (minimax)"
+    case modelMixedTaught = "Model (mixed)"
 
     var id: String { rawValue }
 
@@ -19,6 +20,7 @@ enum AIKind: String, CaseIterable, Identifiable {
         case .minimax: "4-ply adversarial search over Voronoi territory; the stronger teacher"
         case .model: "converted transformer trained to imitate the heuristic (Core AI runtime, :8765)"
         case .modelMinimaxTaught: "same transformer trained to imitate minimax (Core AI runtime, :8766)"
+        case .modelMixedTaught: "same transformer trained on alternating heuristic/minimax games (Core AI runtime, :8767)"
         }
     }
 
@@ -27,6 +29,7 @@ enum AIKind: String, CaseIterable, Identifiable {
         switch self {
         case .model: 8765
         case .modelMinimaxTaught: 8766
+        case .modelMixedTaught: 8767
         default: nil
         }
     }
@@ -101,7 +104,7 @@ final class GameViewModel {
         case .minimax:
             aiPlayer = MinimaxPlayer(depth: 2)
             aiLabel = "minimax (depth 2)"
-        case .model, .modelMinimaxTaught:
+        case .model, .modelMinimaxTaught, .modelMixedTaught:
             let (player, label) = await loadModelPlayer(port: kind.serverPort!)
             aiPlayer = player
             aiLabel = label
