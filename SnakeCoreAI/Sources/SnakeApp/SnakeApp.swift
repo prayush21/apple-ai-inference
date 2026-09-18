@@ -97,8 +97,15 @@ struct ContentView: View {
                 .keyboardShortcut(.defaultAction)
             Text("step \(vm.game.stepCount)")
             Text("A \(vm.game.snakes[0].length) · B \(vm.game.snakes[1].length)")
+            if let load = vm.loadMs {
+                Text(String(format: "load %.0f ms", load)).monospacedDigit().foregroundStyle(.secondary)
+            }
             if let ms = vm.lastInferenceMs {
                 Text(String(format: "AI %.2f ms", ms)).monospacedDigit()
+            }
+            if !vm.inferenceHistory.isEmpty {
+                Button("Save bench") { vm.saveBench() }
+                    .help(vm.benchStatus ?? "write load + inference stats to docs/bench/ (same schema as play.py --json)")
             }
             Spacer()
             switch vm.phase {

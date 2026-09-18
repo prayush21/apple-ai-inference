@@ -1,0 +1,105 @@
+{
+  "schema": "snake-bench/1",
+  "runtime": "coreai.runtime (Python, in-process, CPU)",
+  "recorded_at": "2026-09-18T01:40:47+00:00",
+  "host": {
+    "machine": "arm64",
+    "chip": "Apple M2",
+    "macos": "26.3",
+    "python": "3.12.1",
+    "coreai_core": "1.0.0b2"
+  },
+  "config": {
+    "games": 5,
+    "seed": 100,
+    "max_steps": 250,
+    "safe_only": true,
+    "models_dir": "models"
+  },
+  "players": [
+    {
+      "player": "stateless",
+      "asset": "SnakeTransformer.aimodel",
+      "function": "main",
+      "games": 5,
+      "wins": 2,
+      "draws": 0,
+      "avg_steps": 146.4,
+      "load_ms": {
+        "first": 27.093458997114794,
+        "rest_mean": 2.7338747486282955,
+        "all": [
+          27.093458997114794,
+          2.747791000729194,
+          2.6088749982591253,
+          2.699207998375641,
+          2.8796249971492216
+        ]
+      },
+      "inference_ms": {
+        "count": 732,
+        "mean": 5.475561599696398,
+        "p50": 3.451354501521564,
+        "p95": 14.477541698579438,
+        "first_5": 1.8596317595802248,
+        "last_5": 8.924594880954828
+      }
+    },
+    {
+      "player": "stateful",
+      "asset": "SnakeTransformerStateful.aimodel",
+      "function": "main",
+      "games": 5,
+      "wins": 2,
+      "draws": 0,
+      "avg_steps": 146.4,
+      "load_ms": {
+        "first": 4.223708001518389,
+        "rest_mean": 2.794094250020862,
+        "all": [
+          4.223708001518389,
+          2.7420840015111025,
+          2.7600419998634607,
+          2.8994169988436624,
+          2.7748339998652227
+        ]
+      },
+      "inference_ms": {
+        "count": 732,
+        "mean": 4.6487276639624815,
+        "p50": 4.567478499666322,
+        "p95": 5.065775148614193,
+        "first_5": 4.657923399936408,
+        "last_5": 4.559858320571948
+      }
+    },
+    {
+      "player": "decode",
+      "asset": "SnakeTransformerDecode.aimodel",
+      "function": "main_decode",
+      "games": 5,
+      "wins": 2,
+      "draws": 0,
+      "avg_steps": 146.4,
+      "load_ms": {
+        "first": 3.2197079999605194,
+        "rest_mean": 1.8500100004530395,
+        "all": [
+          3.2197079999605194,
+          1.8217910001112614,
+          1.8648330005817115,
+          1.8957079992105719,
+          1.8177080019086134
+        ]
+      },
+      "inference_ms": {
+        "count": 732,
+        "mean": 3.795467118814615,
+        "p50": 3.7892079999437556,
+        "p95": 3.8804563995654457,
+        "first_5": 3.818808239448117,
+        "last_5": 3.7919434398645535
+      }
+    }
+  ]
+}

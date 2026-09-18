@@ -53,7 +53,15 @@ final class GameViewModel {
     private(set) var phase: Phase = .idle
     private(set) var aiLabel = "—"
     private(set) var lastInferenceMs: Double?
+    /// Wall-clock time of `chooseAction` per move, as the app experiences it.
     private(set) var inferenceHistory: [Double] = []
+    /// For `RemoteModelPlayer`: the server's own inference time per move, so
+    /// the HTTP/JSON overhead is `inferenceHistory - serverInferenceHistory`.
+    private(set) var serverInferenceHistory: [Double] = []
+    /// Time to construct the player (model load + function lookup, or the
+    /// `/info` + `/reset` round trip for the remote player).
+    private(set) var loadMs: Double?
+    private(set) var benchStatus: String?
     private(set) var scores: [AIKind: Scoreboard] = [:]
     var tickInterval: Duration = .milliseconds(140)
 
@@ -78,11 +86,16 @@ final class GameViewModel {
         humanDirection = nil
         lastInferenceMs = nil
         inferenceHistory = []
+        serverInferenceHistory = []
+        loadMs = nil
+        benchStatus = nil
         phase = .loading
         let kind = aiKind
         loop = Task { [weak self] in
             guard let self else { return }
+            let t0 = ContinuousClock.now
             await self.loadPlayer(kind)
+            self.loadMs = Self.ms(since: t0)
             guard !Task.isCancelled else { return }
             self.phase = .running
             await self.run(kind)
@@ -150,9 +163,12 @@ final class GameViewModel {
                 } catch {
                     aiLabel = "AI error: \(error)"
                 }
-                let ms = Double((ContinuousClock.now - t0).components.attoseconds) / 1e15
+                let ms = Self.ms(since: t0)
                 lastInferenceMs = ms
                 inferenceHistory.append(ms)
+                if let remote = p as? RemoteModelPlayer {
+                    serverInferenceHistory.append(remote.lastInferenceMs)
+                }
                 aiPlayer = p
             }
             if game.snakes[1].alive, let d = humanDirection { actions[1] = d }
@@ -171,6 +187,41 @@ final class GameViewModel {
 
     var averageInferenceMs: Double? {
         inferenceHistory.isEmpty ? nil : inferenceHistory.reduce(0, +) / Double(inferenceHistory.count)
+    }
+
+    private static func ms(since t0: ContinuousClock.Instant) -> Double {
+        let c = (ContinuousClock.now - t0).components
+        return Double(c.seconds) * 1e3 + Double(c.attoseconds) / 1e15
+    }
+
+    // MARK: - Bench export
+
+    /// Write this game's load + inference numbers as a `snake-bench/1` record
+    /// (see Bench.swift) next to the Python baseline in `docs/bench/`.
+    func saveBench() {
+        guard let aiPlayer, let loadMs, !inferenceHistory.isEmpty else {
+            benchStatus = "nothing to save yet"
+            return
+        }
+        let player = BenchPlayer(
+            player: aiKind.rawValue, label: aiLabel, games: 1,
+            wins: game.winner == 0 ? 1 : 0, draws: game.isOver && game.winner == nil ? 1 : 0,
+            avgSteps: Double(game.stepCount), loads: [loadMs], inference: inferenceHistory,
+            serverInference: aiPlayer is RemoteModelPlayer ? serverInferenceHistory : nil)
+        let tickMs = tickInterval.components.seconds * 1000 + tickInterval.components.attoseconds / 1_000_000_000_000_000
+        let record = BenchRecord(
+            runtime: BenchRecord.runtimeDescription(for: aiPlayer) + " · SnakeApp, human opponent",
+            config: ["tick_ms": .int(Int(tickMs)), "seed": .int(Int(seed)), "safe_only": true],
+            players: [player])
+        let slug = aiKind.rawValue.lowercased().replacing(/[^a-z0-9]+/, with: "-")
+        let stamp = Date().formatted(.iso8601.year().month().day().dateSeparator(.dash))
+        let url = BenchRecord.defaultDirectory().appending(path: "app-\(slug)-\(stamp).json")
+        do {
+            try record.write(to: url)
+            benchStatus = "saved \(url.path)"
+        } catch {
+            benchStatus = "save failed: \(error)"
+        }
     }
 
     // MARK: - Model discovery

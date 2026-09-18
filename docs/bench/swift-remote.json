@@ -1,0 +1,52 @@
+{
+  "config" : {
+    "games" : 5,
+    "safe_only" : true,
+    "seed" : 100
+  },
+  "host" : {
+    "chip" : "Apple M2",
+    "machine" : "arm64",
+    "macos" : "Version 26.3 (Build 25D125)"
+  },
+  "players" : [
+    {
+      "avg_steps" : 127,
+      "draws" : 1,
+      "games" : 5,
+      "inference_ms" : {
+        "count" : 635,
+        "first_5" : 14.735008400000002,
+        "last_5" : 6.6491916,
+        "mean" : 6.77614158110236,
+        "p50" : 6.634625,
+        "p95" : 7.704458
+      },
+      "label" : "coreai.runtime via snake_ai.serve (HTTP from Swift)",
+      "load_ms" : {
+        "all" : [
+          185.436083,
+          7.280541,
+          4.091625,
+          4.236541,
+          4.117917
+        ],
+        "first" : 185.436083,
+        "rest_mean" : 4.931656
+      },
+      "player" : "model",
+      "server_inference_ms" : {
+        "count" : 635,
+        "first_5" : 12.964142000419088,
+        "last_5" : 4.260833400621777,
+        "mean" : 4.344580976463677,
+        "p50" : 4.22058299955097,
+        "p95" : 4.923584001517156
+      },
+      "wins" : 2
+    }
+  ],
+  "recorded_at" : "2026-09-18T01:44:18Z",
+  "runtime" : "coreai.runtime via snake_ai.serve (HTTP from Swift) · snake-cli, heuristic opponent",
+  "schema" : "snake-bench\/1"
+}

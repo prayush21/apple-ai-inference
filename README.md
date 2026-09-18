@@ -96,6 +96,33 @@ model source with every line annotated by the Core AI ops it produced and
 their timings. `specialize --clear-cache` shows cold specialization (~140 ms)
 vs cached load (<1 ms) with the artifacts in `~/Library/Caches/coreai-cache`.
 
+### Latency baselines (`docs/bench/`)
+
+Every path that runs the model can write a `snake-bench/1` JSON record (load
+ms + per-move inference mean/p50/p95/first-5/last-5, host info) so the numbers
+can be compared once `CoreAI.framework` is available in-process:
+
+```bash
+.venv/bin/python -m snake_ai.play --player all --games 5 --json docs/bench/python.json
+```
+
+```bash
+cd SnakeCoreAI && swift run snake-cli --ai model --games 5 --json ../docs/bench/swift-remote.json   # needs serve.py running
+```
+
+The app's **Save bench** button writes `docs/bench/app-<model>-<date>.json`
+for the game just played (round-trip *and* server-side ms for the remote
+player). Current numbers on an M2, decode asset:
+
+| Path | Load | Per move |
+|---|---|---|
+| Python in-process (`play.py`) | 3 ms warm cache (first in process), ~2 ms after | 3.8 ms |
+| Swift → `serve.py` over HTTP (`snake-cli`) | 185 ms first (`URLSession` warm-up + `/info` + `/reset`), ~5 ms after | 6.8 ms round trip, 4.3 ms of it server-side |
+| Swift `ModelPlayer` on `CoreAI.framework` | — needs macOS 27 | — |
+
+The HTTP hop costs ~2.5 ms from Swift; the remaining ~4 ms is the runtime
+itself, which is why this tiny model will not *feel* different in-process.
+
 ## Swift side
 
 ```bash
