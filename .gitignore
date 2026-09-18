@@ -11,3 +11,5 @@ data/
 .DS_Store
 *.egg-info/
 models/*.txt
+# Hugging Face weights + tokenizer fetched by llm_ai.download
+models/llm/hf/

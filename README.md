@@ -1,4 +1,27 @@
-# Core AI Snake — a clone of the WWDC26 "Meet Core AI" demo
+# apple-ai-inference — Core AI experiments
+
+Hands-on ports of the WWDC26 **Core AI** toolchain, one model at a time. Each
+project is a self-contained Python package (author · convert · verify · run
+· serve) plus a Swift package (in-process `CoreAI.framework` player behind
+`#if canImport(CoreAI)`, and an HTTP fallback that works on macOS 26 today).
+
+| Project | Python | Swift | Model | Status |
+|---|---|---|---|---|
+| 1. Snake | `snake_ai/` | `SnakeCoreAI/` | 118k-param transformer, KV cache as states | complete; latency baselines in `docs/bench/` |
+| 2. SmolLM2 | `llm_ai/` | `LLMCoreAI/` | SmolLM2-360M-Instruct, KV cache as states, tokens/sec | scaffolded (branch `llm`) |
+
+Shared: one `.venv` (`pyproject.toml`; `pip install -e '.[dev,llm]'` for both),
+`docs/coreai-ecosystem.md` for the converter/runtime gotchas that apply to any
+model, and `docs/bench/` for the load / per-step latency records that get a
+`CoreAI.framework` column once this machine is on macOS 27.
+
+Why one repo: the 800 MB torch + `coreai-torch` environment and the gotchas
+doc are the expensive shared parts; the projects themselves are siblings and
+can be split out with `git subtree split` if one ever needs its own life.
+
+---
+
+## Project 1 — Core AI Snake (WWDC26 session 324 clone)
 
 A from-scratch reimplementation of the sample project in
 [WWDC26 session 324 · Meet Core AI](https://developer.apple.com/videos/play/wwdc2026/324/):
@@ -14,7 +37,7 @@ PyTorch model ──torch.export──▶ coreai-torch ──▶ .aimodel ──
                                                      └──▶ CoreAI.framework (Swift, macOS 27+) ──▶ ModelPlayer in app
 ```
 
-## Layout
+### Layout
 
 | Path | What |
 |---|---|
@@ -34,7 +57,7 @@ PyTorch model ──torch.export──▶ coreai-torch ──▶ .aimodel ──
 | `SnakeCoreAI/` | Swift package: `SnakeEngine` (1:1 port of engine, heuristic, minimax), `SnakeCoreAI` (`ModelPlayer` on `CoreAI.framework`, `RemoteModelPlayer` via `serve.py`), `snake-cli`, `SnakeApp` (SwiftUI) |
 | `docs/coreai-ecosystem.md` | Notes on the Core AI ecosystem and the gotchas we hit |
 
-## Quick start (Python side — runs today on macOS 26)
+### Quick start (Python side — runs today on macOS 26)
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
@@ -74,7 +97,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 Tests: `.venv/bin/python -m pytest`.
 
-### What you should see
+#### What you should see
 
 `verify` reports `max |diff| = 0.000000` for the stateless asset and ~1e-6 for a
 40-step decode through the stateful one. `play --player all` reproduces the
@@ -96,7 +119,7 @@ model source with every line annotated by the Core AI ops it produced and
 their timings. `specialize --clear-cache` shows cold specialization (~140 ms)
 vs cached load (<1 ms) with the artifacts in `~/Library/Caches/coreai-cache`.
 
-### Latency baselines (`docs/bench/`)
+#### Latency baselines (`docs/bench/`)
 
 Every path that runs the model can write a `snake-bench/1` JSON record (load
 ms + per-move inference mean/p50/p95/first-5/last-5, host info) so the numbers
@@ -123,7 +146,7 @@ player). Current numbers on an M2, decode asset:
 The HTTP hop costs ~2.5 ms from Swift; the remaining ~4 ms is the runtime
 itself, which is why this tiny model will not *feel* different in-process.
 
-## Swift side
+### Swift side
 
 ```bash
 cd SnakeCoreAI && swift test && swift run snake-cli --games 3 --render
@@ -157,7 +180,7 @@ macOS 27 the model options load in-process via `CoreAI.framework` (it looks for
 `models/SnakeTransformerDecode.aimodel` above the working directory, or
 `SNAKE_MODEL` / `SNAKE_MODEL_FUNCTION`).
 
-### Teachers and students
+#### Teachers and students
 
 | player | vs greedy heuristic, 100 games |
 |---|---|
@@ -172,7 +195,7 @@ cannot express. The next lever is richer input (board occupancy planes), not
 model size or teacher quality. Train the minimax-taught student with
 `python -m snake_ai.train --teacher minimax --dagger-rounds 2`.
 
-## Status
+### Status
 
 - [x] Game engine + features (Python and Swift, parity-tested)
 - [x] PyTorch model, stateless and KV-cache stateful, equivalence-tested
@@ -186,3 +209,38 @@ model size or teacher quality. Train the minimax-taught student with
 - [x] SwiftUI app with a human-controlled second snake
 - [ ] Build & run `ModelPlayer` against the real `CoreAI.framework` (needs Xcode 27 / macOS 27)
 - [ ] Xcode-side tooling: Core AI Instrument, Debugger, debug gauge, `.aimodelc` AOT compilation, `AIModelCache` (needs Xcode 27 / macOS 27)
+
+---
+
+## Project 2 — SmolLM2-360M, tokens as the latency gauge
+
+The snake model is too small for any deployment choice to be *felt*: ~4 ms
+per move against a 140 ms game tick. This project repeats the same pipeline —
+plain-`torch` model with `register_buffer` KV caches → `torch.export` →
+`coreai-torch` → `.aimodel` with states → Python runtime / `serve.py` /
+`CoreAI.framework` — on a 360M-parameter decoder-only LLM, where stateless vs
+stateful is "unusable vs readable", the HTTP hop per token is visible, and
+weight loading is long enough for `AIModelCache` to matter.
+
+```bash
+.venv/bin/pip install -e '.[dev,llm]'                       # adds huggingface_hub, safetensors, tokenizers
+```
+
+```bash
+.venv/bin/python -m llm_ai.download                        # models/llm/hf/SmolLM2-360M-Instruct (~725 MB, gitignored)
+```
+
+```bash
+cd LLMCoreAI && swift build && swift run llm-cli           # reports which generator this build can use
+```
+
+Milestones are listed in `llm_ai/__init__.py`; only `download` and the
+config loader (`llm_ai.model.LlamaConfig.from_hf`) exist so far. SmolLM2-360M
+is a Llama: 32 layers, hidden 960, 15 query heads / 5 KV heads (GQA, `n_rep`
+3), head dim 64, vocab 49152, tied embeddings. With `max_seq_len = 1024` each
+cache state is `[32, 1, 5, 1024, 64]` fp32 ≈ 42 MB.
+
+`LLMCoreAI` mirrors `SnakeCoreAI`: a `TokenGenerator` protocol,
+`RemoteGenerator` (SSE stream from `llm_ai.serve`, port 8770) and
+`ModelGenerator` (`CoreAI.framework`, compiled only on Xcode 27+), an
+`llm-cli` for benches and a SwiftUI `LLMApp` with a tokens/sec gauge.
