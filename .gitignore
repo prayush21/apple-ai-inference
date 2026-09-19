@@ -6,8 +6,12 @@ checkpoints/*.pt
 **/*.aimodel/
 **/*.aimodelc/
 data/
+# decide_ai ships its labeled holdout and the Jev response cache in-tree
+!data/decide/
 .build/
 *.xcodeproj
 .DS_Store
 *.egg-info/
 models/*.txt
+# Hugging Face weights + tokenizer fetched by decide_ai.download
+models/decide/hf/
