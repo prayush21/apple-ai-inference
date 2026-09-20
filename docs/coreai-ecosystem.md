@@ -138,6 +138,29 @@ Observed converting `cross-encoder/nli-MiniLM2-L6-H768` (6 layers, H=768,
     the 328 MB checkpoint that is ~1.3 GB on disk for one 82M-parameter
     model; delete stale hashes when re-converting.
 
+### Future work: ModernBERT (Laya) is a converter project of its own
+
+`convaiinnovations/laya` (ModernBERT-large + decision head, 421M) runs in
+`decide_ai` as a plain-PyTorch backend only; there is no `.aimodel` for it.
+Two reasons, recorded so nobody restarts this by accident:
+
+- **Disk.** The weights are fp16 on disk (843 MB); an fp32 `.aimodel` would
+  be ~1.7 GB plus a ~1.6 GB runtime cache entry (gotcha 15 above scales with
+  the checkpoint), and this machine has ~2 GB free.
+- **Ops.** ModernBERT is not the plain encoder of gotcha 9: rotary position
+  embeddings (a `cos`/`sin` gather + rotate-half per layer), sliding-window
+  local attention on two of every three layers (a banded mask the converter
+  would have to see as a static `[L, L]` tensor, or a windowed kernel),
+  `global_attn_every_n_layers: 3` (two attention flavours in one graph), and
+  `transformers`' unpadding path (`index_put` / gather to pack the batch —
+  the exact op class that broke the snake KV cache, gotcha 2). Each of those
+  is a rewrite before `torch.export` sees a clean graph, and the decision
+  head adds a 2-layer `nn.TransformerEncoder` with a key-padding mask on top.
+
+The honest comparison today is PyTorch on the CPU (what a user without a
+GPU gets): 0.3–1.4 s for a 5-question request, ~35–60 s to load. See
+`docs/bench/decide-laya.json`.
+
 ## Profiling and debugging from Python
 
 | Xcode 27 tool | Python equivalent | Where |

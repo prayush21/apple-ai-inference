@@ -9,7 +9,7 @@ project is a self-contained Python package (author · convert · verify · run
 |---|---|---|---|---|
 | 1. Snake | `snake_ai/` | `SnakeCoreAI/` | 118k-param transformer, KV cache as states | complete; latency baselines in `docs/bench/` |
 | 2. SmolLM2 | `llm_ai/` | `LLMCoreAI/` | SmolLM2-360M-Instruct, KV cache as states, tokens/sec | scaffolded (branch `llm`) |
-| 3. Decide | `decide_ai/` | `DecideCoreAI/` | MiniLM NLI cross-encoder, zero-shot "System One" decisions (text → calibrated yes/no per question) | step 1 done (branch `system-one`): Python pipeline, `/decide` server, holdout, Jev comparison |
+| 3. Decide | `decide_ai/` | `DecideCoreAI/` | MiniLM NLI cross-encoder, zero-shot "System One" decisions (text → calibrated yes/no per question) | step 1 done (branch `system-one`): Python pipeline, `/decide` server, holdout, measured three-way comparison vs Jev and Laya |
 
 Shared: one `.venv` (`pyproject.toml`; `pip install -e '.[dev,llm,decide]'` for all),
 `docs/coreai-ecosystem.md` for the converter/runtime gotchas that apply to any
@@ -299,6 +299,24 @@ tokens), not WordPiece, and the 50k-row embedding table makes it 82M params /
 328 MB fp32, not ~22M. Label order from `config.json`: `[contradiction,
 entailment, neutral]`.
 
+**Laya.** [`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya)
+(Apache 2.0) is an open-weight reimplementation of Jev's architecture:
+ModernBERT-large (395M) + a 2-layer decision head, 421M params, RL-trained
+against strictly proper scoring rules, every question answered in one
+forward pass with no generated tokens. It is the open stand-in for what
+Jev does behind the API, so it is the third backend here (`decide_ai/laya.py`,
+`--backend laya` in `calibrate.py`, `bench.py` and `serve.py`). Its model
+card benchmarks against Jev throughout, but every Jev number in it is quoted
+from third parties ("no TypeSafe API access"); ours are measured, on the
+same 150 states and the same latency matrix, on the same machine — which
+makes the tables below the only three-way comparison that is actually
+measured. Laya runs in plain PyTorch fp32 on the CPU (the checkpoint's own
+`rl_agent_api.py`, no `pip install`); its 421M-parameter fp32 footprint
+(~1.7 GB as an `.aimodel`, plus a runtime cache copy) is why there is no
+Core AI column for it yet, and ModernBERT's RoPE + sliding-window
+attention + unpadding is a converter project of its own
+(`docs/coreai-ecosystem.md`, "Future work").
+
 ### Layout
 
 | Path | What |
@@ -310,10 +328,11 @@ entailment, neutral]`.
 | `decide_ai/convert.py` | `torch.export` → `coreai-torch` → `NLICrossEncoder.aimodel` (dynamic) and `NLICrossEncoderStatic.aimodel` (eight `main_n{N}_l{L}` entrypoints) |
 | `decide_ai/verify.py` | PyTorch ≙ Core AI on 20 real padded pairs; batch-of-4 ≙ 4 × batch-of-1; bit-identical reruns; every static entrypoint |
 | `decide_ai/decider.py` | `LocalModel` (asset + loop thread + static-shape padding), `LocalDecider` / `JevDecider` with one `evaluate(state, questions)` |
+| `decide_ai/laya.py` | `LayaDecider`: the same `evaluate` over Laya's `system_one` (`boolean` ↔ `noul`), lazy 35–55 s load, shipped temperature reported as-is |
 | `decide_ai/holdout.py` | The 150-state triage holdout, its questions, and the human review table |
 | `decide_ai/calibrate.py` | Accuracy / ECE / Brier / hedging / repeatability per backend, temperature fit → `models/decide/calibration.json`, `docs/bench/decide-quality.md` |
-| `decide_ai/serve.py` | `POST /decide` + `GET /info` on :8770 through the Core AI Python runtime |
-| `decide_ai/bench.py` | `decide-bench/1` JSON: in-process, via HTTP, and Jev |
+| `decide_ai/serve.py` | `POST /decide` + `GET /info` on :8770 through the Core AI Python runtime, or `--backend laya` |
+| `decide_ai/bench.py` | `decide-bench/1` JSON: in-process, via HTTP, Jev, and Laya |
 | `DecideCoreAI/` | Swift package: `RemoteDecider` (HTTP), `Decider` on `CoreAI.framework` (macOS 27, pre-tokenized ids), `decide-cli --bench` |
 | `data/decide/` | `questions.json`, `holdout.jsonl`, `holdout_review.md`, `bench_questions.json`, Jev response caches |
 
@@ -343,29 +362,38 @@ cd DecideCoreAI && swift run decide-cli --state "Order #48213 never showed up."
 AI_GATEWAY_API_KEY=... .venv/bin/python -m decide_ai.calibrate     # needs holdout_review.md marked reviewed: true
 ```
 
+```bash
+.venv/bin/python -m decide_ai.bench --backend laya --json docs/bench/decide-laya.json   # Laya, ~5 min incl. load
+```
+
 `verify` prints `max |diff|` ≈ 6e-6 for both assets. `pytest` covers
 tokenizer parity with `tokenizers` (200+ strings), model parity with
-`transformers` (3e-6), batch-vs-single, and `/decide` end-to-end.
+`transformers` (3e-6), batch-vs-single, and `/decide` end-to-end;
+`pytest -m slow` adds the Laya wrapper (loads the checkpoint once).
 
 ### What we measured
 
 Latency (p50 / p95 ms, Apple M2, macOS 26.3, `coreai-core 1.0.0b2`; full
 records and method in [`docs/bench/README.md`](docs/bench/README.md)):
 
-| N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` | Jev via gateway |
-|---|---|---|---|---|---|---|
-| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 |
-| 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | — (macOS 27) | — |
-| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 |
-| 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | — (macOS 27) | — |
-| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 |
-| 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | — (macOS 27) | — |
-| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — |
-| 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | — (macOS 27) | — |
+| N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` | Jev via gateway | Laya (PyTorch, CPU) |
+|---|---|---|---|---|---|---|---|
+| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 | 135 / 165 |
+| 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | — (macOS 27) | — | — |
+| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 | 322 / 748 |
+| 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | — (macOS 27) | — | — |
+| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 | 990 / 1638 |
+| 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | — (macOS 27) | — | — |
+| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — | 1225 / 2240 |
+| 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | — (macOS 27) | — | — |
 
 Jev's post claims 70–500 ms; measured, the warm round trip is p50 255–280 /
 p95 380–560 ms, first call 0.9–2.3 s. The HTTP hop from Python or Swift
-costs 0.7–4.6 ms. **The local numbers are the interim macOS 26 CPU runtime,
+costs 0.7–4.6 ms (0.8–3.6 ms in front of the Laya server too). Laya pads
+to its own sequence, so it has N rows only; its numbers were taken with a
+load average of 4–8 from other apps (recorded in the JSON), and the
+per-row minimums (128 / 233 / 515 / 991 ms) are the model's cost while
+the p95s are the machine's. Load is 35–55 s. **The local numbers are the interim macOS 26 CPU runtime,
 whose matmul runs at ~25 GFLOP/s** (PyTorch does this forward in 29 ms on
 the same CPU; gotcha 13 in the ecosystem doc). So on this machine the
 on-device path only breaks even with Jev for one short question; the
@@ -383,6 +411,19 @@ Quality on the 150-state, human-reviewed triage holdout (5 questions each;
 | local, temperature-scaled (`T = 4.38`) | 0.723 | 0.058 | 0.185 | 0.75 | 0.00 / 0.00 | 529 / 640 |
 | local, `P = entail / (entail + contra)` | 0.727 | 0.077 | 0.180 | 0.80 | 0.00 / 0.00 | 529 / 640 |
 | Jev via Vercel AI Gateway | 0.898 | 0.039 | 0.070 | 0.97 | 0.01 / 0.06 | 287 / 464 |
+| Laya, shipped temperature (`T = 1.98`) | 0.824 | 0.053 | 0.134 | 0.86 | 0.00 / 0.00 | 350 / 662 |
+| Laya, refit on our split (`T = 3.15`) | 0.824 | 0.036 | 0.132 | 0.86 | 0.00 / 0.00 | 350 / 662 |
+
+In one sentence each: **Jev wins on quality** (0.898 accuracy, AUC 0.97,
+ECE 0.039, recall 0.74–0.95 on every question) and on latency once a
+request carries 8+ questions (255 ms vs Laya's 990 and the CPU runtime's
+1.6 s); **Laya wins on cost-per-answer with no network** — half the accuracy
+gap between MiniLM and Jev closed (0.824, AUC 0.86) at 135 ms for one
+question and 322 ms for four, bit-deterministic, Apache 2.0, and it
+actually says yes (recall 0.58–0.90 on complaint / refund / shipping /
+urgent); **MiniLM wins on footprint and the on-device path** — 82M params
+that load in 300 ms against Laya's 421M fp32 and 35–55 s, and the only
+one of the three with a `.aimodel` and a `CoreAI.framework` route.
 
 Where Jev wins: everywhere quality is concerned, and not by a little. It has
 real recall on all five questions (0.74–0.95) with AUC 0.88–0.99. The
@@ -398,8 +439,16 @@ probabilities by up to 0.06 between identical calls, so any threshold sits
 on a coin flip for ~1 % of Jev's answers), no network, no data egress, and a
 p95 within 20 % of its p50. The negation cases the probe worried about are
 fine on both ("I don't want a refund, just send a replacement" → refund 0.04
-local, 0.02 Jev). This table is the argument for step 4: Jev's probabilities
-are a native distillation target, and the on-device model needs them.
+local, 0.02 Jev). Laya, the open Jev-shaped model, misses that negation
+(refund 0.88) and its own card's warning holds: our holdout is a zero-shot
+task family for it, and it lands between the two — `about_product_quality`
+recall 0.23 (AUC 0.78), `urgent` precision 0.37, hedging 0.35 on the unsure
+cells vs Jev's 0.17. Its shipped temperature is already well calibrated
+(ECE 0.053); refitting a single `T` on our 100-state split does not help
+on the 50 held-out states (ECE 0.056 → 0.066), so the shipped row is the
+one to read. This table is the argument for step 4: Jev's probabilities
+are a native distillation target, and the on-device model needs them —
+and Laya shows the architecture can get most of the way there at 421M.
 
 Serving note: the 5-question request pads to N=8 / L=64 on the static asset
 (2.1 s) but N=5 / L=48 on the dynamic one (0.53 s) — enumerate the shapes
@@ -412,6 +461,7 @@ you actually serve, or serve dynamic.
 - [x] Dynamic + static `.aimodel`, verified through `coreai.runtime`
 - [x] 150-state human-reviewed holdout; calibration and quality table
 - [x] `/decide` server, Python / HTTP / Swift→HTTP / Jev latency records
+- [x] Step 1b: Laya as a third backend — quality and latency measured on the same holdout and matrix
 - [ ] Step 2: Swift BPE port, in-process `Decider` on macOS 27
 - [ ] Step 3: app UI with live confidence bars
 - [ ] Step 4: distillation from Jev (native probabilities, input-only pricing)

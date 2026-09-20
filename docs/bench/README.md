@@ -24,6 +24,9 @@ Per move, decode asset: 3.8 ms in-process, 6.8 ms round trip from Swift
 | `decide-remote.json` | `python -m decide_ai.bench --backend remote` — Python → `decide_ai.serve` over HTTP |
 | `decide-swift-remote.json` | `decide-cli --bench` — Swift `RemoteDecider` → `decide_ai.serve` over HTTP |
 | `decide-jev.json` | `python -m decide_ai.bench --backend jev --no-cache` — TypeSafe Jev via the Vercel AI Gateway |
+| `decide-laya.json` | `python -m decide_ai.bench --backend laya` — Laya (`convaiinnovations/laya`, 421M) in-process, PyTorch fp32 on the CPU |
+| `decide-remote-laya.json` | `python -m decide_ai.bench --backend remote --url :8771` — Python → `decide_ai.serve --backend laya` over HTTP |
+| `decide-swift-remote-laya.json` | `decide-cli --bench --url :8771` — Swift `RemoteDecider` → `decide_ai.serve --backend laya` over HTTP |
 
 Rows are N questions per request × padded length L (real holdout states,
 `data/decide/bench_questions.json`). Local / HTTP rows: 20 warm-ups, then
@@ -31,18 +34,37 @@ up to 200 timed calls capped at 60 s wall-clock per row (never fewer than
 30; `count` in each record says how many ran). Jev rows: 5 warm-ups, 30
 timed live calls per N, paced at 25 req/min because the gateway allows 30
 (~4 min for the matrix); Jev answers all N questions in one call and has
-no L. Cells are **p50 / p95 ms**.
+no L. Laya rows: 5 warm-ups, then up to 200 timed in-process calls capped
+at 60 s per row; Laya also answers all N questions in one forward pass
+and pads to its own sequence (max 512), so it has no L either. Cells are
+**p50 / p95 ms**.
 
-| N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` | Jev via gateway |
-|---|---|---|---|---|---|---|
-| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 |
-| 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | — (macOS 27) | — |
-| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 |
-| 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | — (macOS 27) | — |
-| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 |
-| 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | — (macOS 27) | — |
-| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — |
-| 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | — (macOS 27) | — |
+| N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` | Jev via gateway | Laya (PyTorch, CPU) |
+|---|---|---|---|---|---|---|---|
+| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 | 135 / 165 |
+| 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | — (macOS 27) | — | — |
+| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 | 322 / 748 |
+| 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | — (macOS 27) | — | — |
+| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 | 990 / 1638 |
+| 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | — (macOS 27) | — | — |
+| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — | 1225 / 2240 |
+| 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | — (macOS 27) | — | — |
+
+Laya over HTTP (same server shape as the local columns, `decide_ai.serve
+--backend laya` on :8771), round trip p50 / p95 ms and the HTTP+JSON
+overhead at p50: Python→HTTP 149 / 554 (0.8 ms), 316 / 2058 (0.9),
+630 / 1544 (1.3), 1328 / 2633 (2.4); Swift→HTTP 173 / 958 (1.7 ms),
+347 / 1144 (2.3), 977 / 1997 (3.6), 1242 / 2245 (2.6) for N = 1 / 4 / 8 / 16.
+
+**Read the Laya column with its `loadavg_1m` field.** Every Laya record
+was taken with a 1-minute load average of 4–8 from other applications
+on the same 8-core M2 (the local and Jev rows predate the field). The
+per-row minimums — 128 / 233 / 515 / 991 ms in-process, 128 / 256 / 473 /
+984 over HTTP — line up across four runs and are the model's cost; the
+p50s and especially the p95s are the machine's. Two earlier in-process
+runs at load average ~9 gave p50 155 / 918 / 926 / 2194 and 289 / 456 /
+716 / 1278 with p95s up to 6 s. Load: 35–55 s (fp16 safetensors → fp32
+module), first call after load 0.3–1.3 s.
 
 Jev's post claims 70–500 ms; measured from this machine the warm round
 trip is p50 255–280 ms with a p95 of 380–560 ms, and the first (cold) call
@@ -69,9 +91,21 @@ Reading the table:
   cold start beyond the ~300 ms model load, a p95/p50 ratio of ~1.2 vs
   Jev's 1.4–2.0, bit-identical outputs across runs, and nothing leaves the
   machine.
+- **Laya beats the local runtime at every N** (135 / 322 / 990 / 1225 ms
+  vs the static asset's 219 / 838 / 1795 / 4290 at L = 64), in plain
+  PyTorch, with 421M parameters against MiniLM's 82M — which says more
+  about the interim runtime's matmul than about Laya. Against Jev it wins
+  at N = 1 (135 vs 278 ms p50), ties at N = 4 (322 vs 280) and loses at
+  N = 8 (990 vs 255). Like the local
+  path it has no network floor and is bit-deterministic; unlike it, it
+  needs ~1.7 GB of RAM as fp32 and 35–55 s to load. Its 5-question triage
+  request ran at p50 311–350 ms in `calibrate.py`.
 - **Tokens.** Jev meters ~250 template tokens plus the state and ~18 output
   tokens per question (284 / 328 / 382 in, 23 / 77 / 150 out for 1 / 4 / 8
   questions); the local request is the raw pair length, 30–60 tokens per
-  question, and no output tokens. Recorded, not explained.
+  question, and no output tokens; Laya's `usage.input_tokens` is 43 / 181 /
+  362 / 745 for 1 / 4 / 8 / 16 questions (its own `[CLS] type question
+  [SEP] [MASK] opt … [SEP] state [SEP]` sequence per question), 0 out.
+  Recorded, not explained.
 
 Quality on the human-reviewed holdout is in `decide-quality.md`.
