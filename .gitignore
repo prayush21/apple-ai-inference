@@ -15,3 +15,5 @@ data/*
 models/*.txt
 # Hugging Face weights + tokenizer fetched by decide_ai.download
 models/decide/hf/
+# Hugging Face weights + tokenizer fetched by llm_ai.download (branch llm)
+models/llm/hf/
