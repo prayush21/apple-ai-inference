@@ -1,0 +1,136 @@
+{
+  "schema": "decide-bench/1",
+  "runtime": "convaiinnovations/laya (PyTorch, in-process, CPU)",
+  "recorded_at": "2026-09-20T22:26:24+00:00",
+  "host": {
+    "machine": "arm64",
+    "chip": "Apple M2",
+    "macos": "26.3",
+    "python": "3.12.1",
+    "coreai_core": "1.0.0b2"
+  },
+  "model_cache_warm": true,
+  "loadavg_1m": {
+    "before": 4.36865234375,
+    "after": 6.33837890625
+  },
+  "model": {
+    "repo": "convaiinnovations/laya",
+    "encoder": "answerdotai/ModernBERT-large",
+    "params": 421293830,
+    "dtype_on_disk": "F16",
+    "tensor_dtypes": {
+      "F32": 1,
+      "F16": 205
+    },
+    "safetensors_mb": 843,
+    "max_len": 512,
+    "temperature_noul": 1.983399510383606,
+    "torch": "2.12.1",
+    "transformers": "5.17.0",
+    "device": "cpu",
+    "compute_dtype": "fp32"
+  },
+  "config": {
+    "backend": "laya",
+    "batches": [
+      1,
+      4,
+      8,
+      16
+    ],
+    "lengths": null,
+    "warmup": 5,
+    "calls": 200,
+    "min_calls": 30,
+    "budget_s": 60.0,
+    "inputs": "data/decide/holdout.jsonl states x data/decide/bench_questions.json",
+    "note": "Laya: N is questions per request, one forward pass in PyTorch fp32 on the CPU; it pads to its own sequence so there is no L; 5 warm-ups then timed calls capped by budget_s; load_ms.first is the single load of the 421M checkpoint (fp16 safetensors -> fp32)"
+  },
+  "rows": [
+    {
+      "model": "laya",
+      "N": 1,
+      "L": null,
+      "load_ms": {
+        "first": 34953.24062499276
+      },
+      "first_call_ms": 283.2189170003403,
+      "usage_mean": {
+        "inputTokens": 43.359223300970875,
+        "outputTokens": 0.0
+      },
+      "total_ms": {
+        "count": 200,
+        "mean": 141.64117894411902,
+        "p50": 134.69929150596727,
+        "p95": 164.87043929737396,
+        "min": 127.80129199381918,
+        "max": 328.3758749894332
+      }
+    },
+    {
+      "model": "laya",
+      "N": 4,
+      "L": null,
+      "load_ms": {
+        "first": 34953.24062499276
+      },
+      "first_call_ms": 283.69479200046044,
+      "usage_mean": {
+        "inputTokens": 181.37579617834396,
+        "outputTokens": 0.0
+      },
+      "total_ms": {
+        "count": 151,
+        "mean": 398.0044500599885,
+        "p50": 321.90691599680576,
+        "p95": 747.8384999922127,
+        "min": 232.85937499895226,
+        "max": 2839.279500010889
+      }
+    },
+    {
+      "model": "laya",
+      "N": 8,
+      "L": null,
+      "load_ms": {
+        "first": 34953.24062499276
+      },
+      "first_call_ms": 691.6720419976627,
+      "usage_mean": {
+        "inputTokens": 361.8787878787879,
+        "outputTokens": 0.0
+      },
+      "total_ms": {
+        "count": 60,
+        "mean": 1009.8701394839736,
+        "p50": 990.3123955009505,
+        "p95": 1637.7739639392523,
+        "min": 514.8139170050854,
+        "max": 2920.75304100581
+      }
+    },
+    {
+      "model": "laya",
+      "N": 16,
+      "L": null,
+      "load_ms": {
+        "first": 34953.24062499276
+      },
+      "first_call_ms": 1129.24949999433,
+      "usage_mean": {
+        "inputTokens": 745.1224489795918,
+        "outputTokens": 0.0
+      },
+      "total_ms": {
+        "count": 43,
+        "mean": 1415.4202955122496,
+        "p50": 1225.3003750083735,
+        "p95": 2239.952941700176,
+        "min": 990.8782499987865,
+        "max": 3117.8939579986036
+      }
+    }
+  ]
+}

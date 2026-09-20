@@ -3,11 +3,14 @@
     python -m decide_ai.bench --backend local  --json docs/bench/decide-python.json
     python -m decide_ai.bench --backend remote --json docs/bench/decide-remote.json   # needs decide_ai.serve on :8770
     python -m decide_ai.bench --backend jev --no-cache --json docs/bench/decide-jev.json
+    python -m decide_ai.bench --backend laya --json docs/bench/decide-laya.json
 
 Rows are ``{asset, N, L}`` for N questions per request x padded length L
 (local / remote: N in {1,4,8,16} x L in {64,128}, both assets; Jev: N in
-{1,4,8}, one call answers all N questions and there is no L). Inputs are
-real holdout states and the questions in ``data/decide/bench_questions.json``.
+{1,4,8}, one call answers all N questions and there is no L; Laya: N in
+{1,4,8,16}, in-process PyTorch on CPU, pads to its own sequence so no L
+either). Inputs are real holdout states and the questions in
+``data/decide/bench_questions.json``.
 
 Per row: ``load_ms`` (first / rest_mean, three loads), the first call after
 load on its own (``first_call_ms``), then ``warmup`` untimed calls and a timed
@@ -16,13 +19,17 @@ run of ``calls`` calls capped by ``budget_s`` wall-clock (never fewer than
 the large shapes take seconds per call on the local runtime. Timings are
 split into ``tokenize_ms`` and ``infer_ms`` in-process; ``roundtrip_ms`` vs
 ``server_infer_ms`` for the remote backend (the difference is JSON + HTTP);
-``roundtrip_ms`` plus ``usage`` for Jev, whose calls are paced at 25/min.
+``roundtrip_ms`` plus ``usage`` for Jev, whose calls are paced at 25/min;
+``total_ms`` plus ``usage`` for Laya (its API has no tokenize / infer
+split), 5 warm-ups then >= 30 calls capped at 60 s per row, and a single
+``load_ms.first`` because loading the 421M checkpoint is ~35-60 s.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -33,6 +40,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import laya
 from .convert import DEFAULT_OUT_DIR, STATIC_BATCHES, STATIC_LENGTHS
 from .decider import ASSETS, LocalDecider, LocalModel
 from .download import model_dir
@@ -209,11 +217,46 @@ def run_jev(a: argparse.Namespace) -> tuple[str, list[dict]]:
     return "typesafe-ai/jev via Vercel AI Gateway", rows
 
 
+# --------------------------------------------------------------------------- laya
+
+def run_laya(a: argparse.Namespace) -> tuple[str, list[dict]]:
+    if not laya.available(a.hf_dir):
+        print(f"no Laya checkpoint under {a.hf_dir}; skipping")
+        return "convaiinnovations/laya (PyTorch, in-process, CPU)", []
+    states, _ = bench_inputs(1)
+    decider = laya.LayaDecider(a.hf_dir)
+    print(f"loading {a.hf_dir} ...", flush=True)
+    load_ms = decider.load()
+    print(f"laya: load ms first {load_ms:.0f} (one load; the checkpoint is 421M params)")
+    rows = []
+    for n in a.batches:
+        _, questions = bench_inputs(n)
+        usages: list[dict] = []
+
+        def call(i, q=questions):
+            _, usage, timing, _ = decider.evaluate(states[i % len(states)], q)
+            usages.append(usage)
+            return {"total_ms": timing["ms_total"]}
+
+        t0 = time.perf_counter()
+        call(0)
+        first_call = (time.perf_counter() - t0) * 1e3
+        res = timed_loop(call, warmup=a.warmup, calls=a.calls, budget_s=a.budget_s, min_calls=a.min_calls,
+                         label=f"laya N={n}")
+        usage = {k: float(np.mean([u.get(k, 0) for u in usages])) for k in ("inputTokens", "outputTokens")}
+        rows.append({"model": "laya", "N": n, "L": None, "load_ms": {"first": load_ms},
+                     "first_call_ms": first_call, "usage_mean": usage, **res})
+        print(f"  N={n:2d} total p50 {res['total_ms']['p50']:6.0f} p95 {res['total_ms']['p95']:6.0f} "
+              f"min {res['total_ms']['min']:6.0f} max {res['total_ms']['max']:6.0f} ms, first {first_call:.0f} ms, "
+              f"tokens {usage['inputTokens']:.0f} in (n={res['total_ms']['count']})", flush=True)
+    return "convaiinnovations/laya (PyTorch, in-process, CPU)", rows
+
+
 # --------------------------------------------------------------------------- main
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--backend", choices=["local", "remote", "jev"], default="local")
+    ap.add_argument("--backend", choices=["local", "remote", "jev", "laya"], default="local")
     ap.add_argument("--models-dir", type=Path, default=DEFAULT_OUT_DIR)
     ap.add_argument("--assets", nargs="+", choices=list(ASSETS), default=["dynamic", "static"])
     ap.add_argument("--batches", nargs="+", type=int)
@@ -223,6 +266,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--min-calls", type=int)
     ap.add_argument("--budget-s", type=float, default=60.0, help="wall-clock cap per row (local/remote)")
     ap.add_argument("--url", default="http://127.0.0.1:8770")
+    ap.add_argument("--hf-dir", type=Path, default=laya.DEFAULT_HF_DIR, help="laya checkpoint dir")
     ap.add_argument("--no-cache", action="store_true", help="jev: bypass the response cache (live calls)")
     ap.add_argument("--json", type=Path)
     a = ap.parse_args(argv)
@@ -232,6 +276,11 @@ def main(argv: list[str] | None = None) -> None:
         a.calls = 30 if a.calls is None else a.calls
         a.min_calls = a.calls if a.min_calls is None else a.min_calls
         a.budget_s = 1e9
+    elif a.backend == "laya":
+        a.batches = a.batches or list(STATIC_BATCHES)
+        a.warmup = 5 if a.warmup is None else a.warmup
+        a.calls = 200 if a.calls is None else a.calls
+        a.min_calls = 30 if a.min_calls is None else a.min_calls
     else:
         a.batches = a.batches or list(STATIC_BATCHES)
         a.warmup = 20 if a.warmup is None else a.warmup
@@ -239,7 +288,8 @@ def main(argv: list[str] | None = None) -> None:
         a.min_calls = 30 if a.min_calls is None else a.min_calls
 
     cache_was_warm = CACHE_DIR.exists()
-    runtime, rows = {"local": run_local, "remote": run_remote, "jev": run_jev}[a.backend](a)
+    load_before = os.getloadavg()[0]  # other processes compete for the same cores; recorded, not controlled
+    runtime, rows = {"local": run_local, "remote": run_remote, "jev": run_jev, "laya": run_laya}[a.backend](a)
     if a.json:
         record = {
             "schema": "decide-bench/1",
@@ -247,14 +297,20 @@ def main(argv: list[str] | None = None) -> None:
             "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "host": host_info(),
             "model_cache_warm": cache_was_warm,
+            "loadavg_1m": {"before": load_before, "after": os.getloadavg()[0]},
+            **({"model": laya.model_info(a.hf_dir)} if a.backend == "laya" and rows else {}),
             "config": {
-                "backend": a.backend, "batches": a.batches, "lengths": None if a.backend == "jev" else a.lengths,
+                "backend": a.backend, "batches": a.batches,
+                "lengths": None if a.backend in ("jev", "laya") else a.lengths,
                 "warmup": a.warmup, "calls": a.calls, "min_calls": a.min_calls,
                 "budget_s": None if a.backend == "jev" else a.budget_s,
                 "inputs": "data/decide/holdout.jsonl states x data/decide/bench_questions.json",
                 "note": ("Jev: N is questions per request; 30 timed calls after 5 warm-ups per N because the gateway "
                          "allows 30 req/min and calls are paced at 25/min (~4 min for the matrix); --no-cache means "
                          "every call was live" if a.backend == "jev" else
+                         "Laya: N is questions per request, one forward pass in PyTorch fp32 on the CPU; it pads to "
+                         "its own sequence so there is no L; 5 warm-ups then timed calls capped by budget_s; load_ms.first "
+                         "is the single load of the 421M checkpoint (fp16 safetensors -> fp32)" if a.backend == "laya" else
                          "count per row is capped by budget_s; the local runtime takes seconds per call at large N x L"),
                 **({"url": a.url} if a.backend == "remote" else {}),
                 **({"no_cache": a.no_cache} if a.backend == "jev" else {}),
