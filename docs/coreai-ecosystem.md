@@ -126,7 +126,11 @@ Observed converting `cross-encoder/nli-MiniLM2-L6-H768` (6 layers, H=768,
     p50 over 20 calls: N=1 L=64 268 vs 276 ms; N=4 L=64 1040 vs 1311 ms;
     N=1 L=128 538 vs 533 ms; N=8 L=128 4371 vs 4377 ms. Once the matmuls
     are seconds, the fixed per-call overhead disappears in the noise.
-    Full matrix in `docs/bench/decide-python.json`.
+    Full matrix in `docs/bench/decide-python.json`. The flip side: a request
+    that does not match an enumerated shape is padded up to the next one,
+    and cost is linear in N·L — the 5-question triage call runs as N=8/L=64
+    on the static asset (2.1 s) but N=5/L=48 on the dynamic one (0.53 s).
+    Enumerate the shapes you actually serve.
 
 15. **First load writes a full copy of the weights to the specialization
     cache.** `~/Library/Caches/coreai-cache/<python>/<hash>/` gained 316 MB

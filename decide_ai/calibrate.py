@@ -92,8 +92,19 @@ def metrics(labels: list, probs: list[float]) -> dict:
         else:
             table.append((b, 0, float("nan"), float("nan")))
     hedge = float(np.mean([abs(pp - 0.5) for pp, _ in hard])) if hard else float("nan")
+    # Threshold-free and threshold diagnostics: a model that never says yes
+    # scores the base rate on accuracy, which the table above would hide.
+    tp = float(((pred == 1) & (y == 1)).sum()); fp = float(((pred == 1) & (y == 0)).sum())
+    fn = float(((pred == 0) & (y == 1)).sum())
+    pos, neg = p[y == 1], p[y == 0]
+    auc = float((pos[:, None] > neg[None, :]).mean() + 0.5 * (pos[:, None] == neg[None, :]).mean()) if len(pos) and len(neg) else float("nan")
     return {"n": int(len(p)), "n_unsure": len(hard), "accuracy": acc, "ece": float(ece), "brier": brier,
-            "hedging": hedge, "reliability": table}
+            "hedging": hedge, "reliability": table,
+            "base_rate_no": float((y == 0).mean()) if len(y) else float("nan"),
+            "yes_rate": float(pred.mean()) if len(pred) else float("nan"),
+            "recall": tp / (tp + fn) if tp + fn else float("nan"),
+            "precision": tp / (tp + fp) if tp + fp else float("nan"),
+            "auc": auc}
 
 
 def pooled(rows: list[dict], scores: dict, key=lambda s, q: s["p"][q]) -> dict:
@@ -169,13 +180,15 @@ def write_report(path: Path, results: list[dict], rows: list[dict], notes: list[
          + ", ".join(f"{k} {v}" for k, v in cats.items()) + ".",
          "Accuracy / ECE / Brier exclude cells labeled *unsure*; **hedging** is mean |p − 0.5| on those cells "
          "(lower is better). **Repeatability** is mean / max |p₁ − p₂| over a fixed 30-state subset scored twice. "
-         "Latency is the per-state call (5 questions) as measured in this run; Jev's from the first live pass.", "",
-         "| backend | accuracy | ECE | Brier | hedging | repeatability mean / max | latency p50 / p95 ms |",
-         "|---|---|---|---|---|---|---|"]
+         "Latency is the per-state call (5 questions) as measured in this run; Jev's from the first live pass. "
+         "Accuracy is at p ≥ 0.5 — read it against the per-question yes-rate below, because a model that never "
+         "says yes scores the base rate. AUC is threshold-free (pooled over all 5 questions' cells).", "",
+         "| backend | accuracy | ECE | Brier | hedging | AUC | repeatability mean / max | latency p50 / p95 ms |",
+         "|---|---|---|---|---|---|---|---|"]
     for r in results:
         m = r["metrics"]["pooled"]; rep = r["repeatability"]; lat = r["latency"]
         L.append(f"| {r['name']} | {fmt(m['accuracy'])} | {fmt(m['ece'])} | {fmt(m['brier'])} | {fmt(m['hedging'])} | "
-                 f"{fmt(rep['mean'], 2)} / {fmt(rep['max'], 2)} | {lat['p50']:.0f} / {lat['p95']:.0f} |")
+                 f"{fmt(m['auc'])} | {fmt(rep['mean'], 2)} / {fmt(rep['max'], 2)} | {lat['p50']:.0f} / {lat['p95']:.0f} |")
     L += ["", "## Per question (accuracy / ECE / hedging)", "",
           "| backend | " + " | ".join(QUESTION_KEYS) + " |", "|---|" + "---|" * len(QUESTION_KEYS)]
     for r in results:
@@ -183,6 +196,15 @@ def write_report(path: Path, results: list[dict], rows: list[dict], notes: list[
         for q in QUESTION_KEYS:
             m = r["metrics"]["per_question"][q]
             cells.append(f"{fmt(m['accuracy'], 2)} / {fmt(m['ece'], 2)} / {fmt(m['hedging'], 2)}")
+        L.append(f"| {r['name']} | " + " | ".join(cells) + " |")
+    L += ["", "## Per question, threshold diagnostics (yes-rate · recall · precision · AUC; base rate of *no* in the header)", "",
+          "| backend | " + " | ".join(f"{q} (no {results[0]['metrics']['per_question'][q]['base_rate_no']:.2f})" for q in QUESTION_KEYS) + " |",
+          "|---|" + "---|" * len(QUESTION_KEYS)]
+    for r in results:
+        cells = []
+        for q in QUESTION_KEYS:
+            m = r["metrics"]["per_question"][q]
+            cells.append(f"{fmt(m['yes_rate'], 2)} · {fmt(m['recall'], 2)} · {fmt(m['precision'], 2)} · {fmt(m['auc'], 2)}")
         L.append(f"| {r['name']} | " + " | ".join(cells) + " |")
     L += ["", "## Reliability (10 bins over confidence = max(p, 1−p); count · mean confidence · accuracy)", ""]
     for r in results:
@@ -277,11 +299,14 @@ def main(argv: list[str] | None = None) -> None:
 
     # console summary
     print()
-    print(f"{'backend':44s} {'acc':>6s} {'ECE':>6s} {'Brier':>6s} {'hedge':>6s} {'rep':>11s} {'p50/p95 ms':>14s}")
+    print(f"{'backend':44s} {'acc':>6s} {'ECE':>6s} {'Brier':>6s} {'hedge':>6s} {'AUC':>6s} {'rep':>11s} {'p50/p95 ms':>14s}")
     for r in results:
         m = r["metrics"]["pooled"]; rep = r["repeatability"]; lat = r["latency"]
-        print(f"{r['name']:44s} {m['accuracy']:6.3f} {m['ece']:6.3f} {m['brier']:6.3f} {fmt(m['hedging']):>6s} "
+        print(f"{r['name']:44s} {m['accuracy']:6.3f} {m['ece']:6.3f} {m['brier']:6.3f} {fmt(m['hedging']):>6s} {m['auc']:6.3f} "
               f"{rep['mean']:5.2f}/{rep['max']:5.2f} {lat['p50']:7.0f}/{lat['p95']:6.0f}")
+        print("    per question yes-rate/recall/AUC: " + "  ".join(
+            f"{q[:9]} {r['metrics']['per_question'][q]['yes_rate']:.2f}/{fmt(r['metrics']['per_question'][q]['recall'], 2)}/"
+            f"{fmt(r['metrics']['per_question'][q]['auc'], 2)}" for q in QUESTION_KEYS))
     for n in notes:
         print(f"- {n}")
 
