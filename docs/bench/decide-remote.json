@@ -1,0 +1,283 @@
+{
+  "schema": "decide-bench/1",
+  "runtime": "coreai.runtime via decide_ai.serve (HTTP from Python)",
+  "recorded_at": "2026-09-20T05:13:59+00:00",
+  "host": {
+    "machine": "arm64",
+    "chip": "Apple M2",
+    "macos": "26.3",
+    "python": "3.12.1",
+    "coreai_core": "1.0.0b2"
+  },
+  "model_cache_warm": true,
+  "config": {
+    "backend": "remote",
+    "batches": [
+      1,
+      4,
+      8,
+      16
+    ],
+    "lengths": [
+      64,
+      128
+    ],
+    "warmup": 20,
+    "calls": 200,
+    "min_calls": 30,
+    "budget_s": 60.0,
+    "inputs": "data/decide/holdout.jsonl states x data/decide/bench_questions.json",
+    "note": "count per row is capped by budget_s; the local runtime takes seconds per call at large N x L",
+    "url": "http://127.0.0.1:8770"
+  },
+  "rows": [
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 1,
+      "L": 64,
+      "first_call_ms": 1972.814833992743,
+      "http_overhead_p50_ms": 0.7982914987416052,
+      "roundtrip_ms": {
+        "count": 200,
+        "mean": 289.6495123247587,
+        "p50": 281.4282914987416,
+        "p95": 336.12618895203923,
+        "min": 262.2520420118235,
+        "max": 467.06666599493474
+      },
+      "server_infer_ms": {
+        "count": 200,
+        "mean": 288.516415,
+        "p50": 280.4465,
+        "p95": 334.86305,
+        "min": 261.168,
+        "max": 465.396
+      },
+      "server_total_ms": {
+        "count": 200,
+        "mean": 288.774395,
+        "p50": 280.63,
+        "p95": 335.0346,
+        "min": 261.306,
+        "max": 465.919
+      }
+    },
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 1,
+      "L": 128,
+      "first_call_ms": 859.7375829995144,
+      "http_overhead_p50_ms": 0.7987709982819524,
+      "roundtrip_ms": {
+        "count": 122,
+        "mean": 493.347651664035,
+        "p50": 533.3397709982819,
+        "p95": 595.2693943509074,
+        "min": 413.79208299622405,
+        "max": 857.5135830033105
+      },
+      "server_infer_ms": {
+        "count": 122,
+        "mean": 492.31022131147535,
+        "p50": 532.4014999999999,
+        "p95": 594.2637,
+        "min": 412.956,
+        "max": 856.181
+      },
+      "server_total_ms": {
+        "count": 122,
+        "mean": 492.46597540983606,
+        "p50": 532.5409999999999,
+        "p95": 594.4063999999998,
+        "min": 413.082,
+        "max": 856.416
+      }
+    },
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 4,
+      "L": 64,
+      "first_call_ms": 820.2367920021061,
+      "http_overhead_p50_ms": 0.7293125049559421,
+      "roundtrip_ms": {
+        "count": 74,
+        "mean": 820.508989852356,
+        "p50": 810.691812504956,
+        "p95": 876.3862024075933,
+        "min": 805.2935419982532,
+        "max": 1002.8057500021532
+      },
+      "server_infer_ms": {
+        "count": 74,
+        "mean": 819.2788243243243,
+        "p50": 809.6675,
+        "p95": 875.17545,
+        "min": 804.302,
+        "max": 1000.876
+      },
+      "server_total_ms": {
+        "count": 74,
+        "mean": 819.556108108108,
+        "p50": 809.9625000000001,
+        "p95": 875.4266,
+        "min": 804.521,
+        "max": 1001.198
+      }
+    },
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 4,
+      "L": 128,
+      "first_call_ms": 1619.3283750035334,
+      "http_overhead_p50_ms": 0.9059579963134183,
+      "roundtrip_ms": {
+        "count": 37,
+        "mean": 1637.247584351949,
+        "p50": 1617.1349579963135,
+        "p95": 1718.368782996549,
+        "min": 1607.4670830130344,
+        "max": 1823.7333330034744
+      },
+      "server_infer_ms": {
+        "count": 37,
+        "mean": 1635.5817297297297,
+        "p50": 1615.919,
+        "p95": 1716.5065999999997,
+        "min": 1606.467,
+        "max": 1820.493
+      },
+      "server_total_ms": {
+        "count": 37,
+        "mean": 1635.9025945945946,
+        "p50": 1616.229,
+        "p95": 1717.0597999999998,
+        "min": 1606.71,
+        "max": 1821.054
+      }
+    },
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 8,
+      "L": 64,
+      "first_call_ms": 1620.0131670047995,
+      "http_overhead_p50_ms": 0.742291996120457,
+      "roundtrip_ms": {
+        "count": 37,
+        "mean": 1627.9580044588452,
+        "p50": 1607.3472919961205,
+        "p95": 1766.1973246023988,
+        "min": 1590.5415829911362,
+        "max": 1839.0406249964144
+      },
+      "server_infer_ms": {
+        "count": 37,
+        "mean": 1626.1917297297296,
+        "p50": 1606.204,
+        "p95": 1764.7923999999998,
+        "min": 1589.419,
+        "max": 1828.342
+      },
+      "server_total_ms": {
+        "count": 37,
+        "mean": 1626.7366486486487,
+        "p50": 1606.605,
+        "p95": 1765.2387999999996,
+        "min": 1589.751,
+        "max": 1829.733
+      }
+    },
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 8,
+      "L": 128,
+      "first_call_ms": 3243.5256669996306,
+      "http_overhead_p50_ms": 1.0261665029565847,
+      "roundtrip_ms": {
+        "count": 30,
+        "mean": 3262.7717472001677,
+        "p50": 3239.5761665029568,
+        "p95": 3375.652792154142,
+        "min": 3204.6564999909606,
+        "max": 3558.629416002077
+      },
+      "server_infer_ms": {
+        "count": 30,
+        "mean": 3260.7552000000005,
+        "p50": 3238.0735,
+        "p95": 3373.2790499999996,
+        "min": 3203.455,
+        "max": 3549.302
+      },
+      "server_total_ms": {
+        "count": 30,
+        "mean": 3261.2774,
+        "p50": 3238.55,
+        "p95": 3374.0429,
+        "min": 3203.868,
+        "max": 3549.979
+      }
+    },
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 16,
+      "L": 64,
+      "first_call_ms": 3219.4166670087725,
+      "http_overhead_p50_ms": 1.715103996624748,
+      "roundtrip_ms": {
+        "count": 30,
+        "mean": 3590.601409799516,
+        "p50": 3417.6881039966247,
+        "p95": 4490.704130947413,
+        "min": 3265.849540999625,
+        "max": 4914.528499997687
+      },
+      "server_infer_ms": {
+        "count": 30,
+        "mean": 3585.7150666666666,
+        "p50": 3414.5395,
+        "p95": 4482.984799999998,
+        "min": 3263.944,
+        "max": 4908.214
+      },
+      "server_total_ms": {
+        "count": 30,
+        "mean": 3587.1278,
+        "p50": 3415.973,
+        "p95": 4485.150549999998,
+        "min": 3264.637,
+        "max": 4910.203
+      }
+    },
+    {
+      "asset": "NLICrossEncoderStatic.aimodel",
+      "N": 16,
+      "L": 128,
+      "first_call_ms": 7254.9869590002345,
+      "http_overhead_p50_ms": 4.542145492481723,
+      "roundtrip_ms": {
+        "count": 30,
+        "mean": 6635.884995799764,
+        "p50": 6603.525645492482,
+        "p95": 6879.1037729497475,
+        "min": 6490.94529201102,
+        "max": 6940.220332995523
+      },
+      "server_infer_ms": {
+        "count": 30,
+        "mean": 6630.769833333335,
+        "p50": 6597.6425,
+        "p95": 6873.9406,
+        "min": 6488.059,
+        "max": 6934.945
+      },
+      "server_total_ms": {
+        "count": 30,
+        "mean": 6632.542600000001,
+        "p50": 6598.9835,
+        "p95": 6874.99035,
+        "min": 6490.114,
+        "max": 6937.294
+      }
+    }
+  ]
+}
