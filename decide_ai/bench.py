@@ -4,6 +4,7 @@
     python -m decide_ai.bench --backend remote --json docs/bench/decide-remote.json   # needs decide_ai.serve on :8770
     python -m decide_ai.bench --backend jev --no-cache --json docs/bench/decide-jev.json
     python -m decide_ai.bench --backend laya --json docs/bench/decide-laya.json
+    python -m decide_ai.bench --backend remote --url http://127.0.0.1:8771 --warmup 5 --json docs/bench/decide-remote-laya.json
 
 Rows are ``{asset, N, L}`` for N questions per request x padded length L
 (local / remote: N in {1,4,8,16} x L in {64,128}, both assets; Jev: N in
@@ -147,23 +148,27 @@ def _post(url: str, payload: dict, timeout: float = 120) -> dict:
 def run_remote(a: argparse.Namespace) -> tuple[str, list[dict]]:
     with urllib.request.urlopen(a.url + "/info", timeout=5) as r:
         info = json.loads(r.read())
-    print(f"server: {info['asset']} max_len={info['max_len']} T={info['temperature']}")
+    print(f"server: {info.get('backend', 'local')} {info['asset']} max_len={info['max_len']} T={info['temperature']}")
+    is_laya = info.get("backend") == "laya"
+    lengths = [None] if is_laya else a.lengths  # Laya pads to its own sequence: N only
     states, _ = bench_inputs(1)
     rows = []
     for n in a.batches:
-        for length in a.lengths:
-            if length > info["max_len"]:
+        for length in lengths:
+            if length is not None and length > info["max_len"]:
                 print(f"  skip L={length}: server --max-len is {info['max_len']}")
                 continue
             _, questions = bench_inputs(n)
 
             def call(i, q=questions, L=length):
                 t0 = time.perf_counter()
-                out = _post(a.url + "/decide", {"model": "local", "state": states[i % len(states)],
-                                                "questions": q, "padded_len": L})
+                out = _post(a.url + "/decide", {"model": "local", "state": states[i % len(states)], "questions": q,
+                                                **({} if L is None else {"padded_len": L})})
                 rt = (time.perf_counter() - t0) * 1e3
-                return {"roundtrip_ms": rt, "server_infer_ms": out["timing"]["ms_infer"],
-                        "server_total_ms": out["timing"]["ms_total"]}
+                sample = {"roundtrip_ms": rt, "server_total_ms": out["timing"]["ms_total"]}
+                if "ms_infer" in out["timing"]:
+                    sample["server_infer_ms"] = out["timing"]["ms_infer"]
+                return sample
 
             t0 = time.perf_counter()
             call(0)
@@ -173,9 +178,12 @@ def run_remote(a: argparse.Namespace) -> tuple[str, list[dict]]:
             overhead = res["roundtrip_ms"]["p50"] - res["server_total_ms"]["p50"]
             rows.append({"asset": info["asset"], "N": n, "L": length, "first_call_ms": first_call,
                          "http_overhead_p50_ms": overhead, **res})
-            print(f"  N={n:2d} L={length:3d} roundtrip p50 {res['roundtrip_ms']['p50']:8.1f} ms, server infer p50 "
-                  f"{res['server_infer_ms']['p50']:8.1f}, HTTP+JSON overhead {overhead:.1f} ms (n={res['roundtrip_ms']['count']})",
-                  flush=True)
+            infer = res.get("server_infer_ms", res["server_total_ms"])["p50"]
+            print(f"  N={n:2d} L={length or '—':>3} roundtrip p50 {res['roundtrip_ms']['p50']:8.1f} ms, server "
+                  f"{'infer' if 'server_infer_ms' in res else 'total'} p50 {infer:8.1f}, HTTP+JSON overhead {overhead:.1f} ms "
+                  f"(n={res['roundtrip_ms']['count']})", flush=True)
+    if is_laya:
+        return "convaiinnovations/laya (PyTorch, CPU) via decide_ai.serve --backend laya (HTTP from Python)", rows
     return "coreai.runtime via decide_ai.serve (HTTP from Python)", rows
 
 

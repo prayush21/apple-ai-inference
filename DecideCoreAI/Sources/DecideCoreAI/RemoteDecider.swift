@@ -5,6 +5,9 @@ import Foundation
 /// in-process. Measures the round trip and exposes the server's own timing.
 public struct RemoteDecider: Sendable {
     public struct Info: Decodable, Sendable {
+        /// `local-static` / `local-dynamic` / `laya`.
+        public let backend: String
+        /// The `.aimodel` file for the local backends, `"laya"` for Laya (no asset: PyTorch on the CPU).
         public let asset: String
         public let functions: [String]
         public let maxLen: Int
@@ -12,14 +15,17 @@ public struct RemoteDecider: Sendable {
         public let score: String
         public let labels: [String]
 
-        enum CodingKeys: String, CodingKey { case asset, functions, maxLen = "max_len", temperature, score, labels }
+        enum CodingKeys: String, CodingKey { case backend, asset, functions, maxLen = "max_len", temperature, score, labels }
+
+        /// Laya pads to its own sequence, so the bench has no `L` to pin.
+        public var pinsPaddedLen: Bool { backend != "laya" }
     }
 
     public struct Result: Sendable {
         public let response: DecideResponse
         /// Wall-clock `decide` as the caller experiences it (JSON + HTTP + inference).
         public let roundtripMs: Double
-        /// The server's inference-only time, for attributing the difference to the HTTP hop.
+        /// The server's inference-only time, for attributing the difference to the HTTP hop (nil for Laya).
         public var serverInferMs: Double? { response.timing?.msInfer }
         public var serverTotalMs: Double? { response.timing?.msTotal }
     }

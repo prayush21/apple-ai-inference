@@ -54,13 +54,14 @@ public struct Usage: Codable, Sendable, Equatable {
     public var outputTokens: Int
 }
 
-/// Server-side timing; only `decide_ai.serve` sends it.
+/// Server-side timing; only `decide_ai.serve` sends it. The Laya backend
+/// (`--backend laya`) reports `ms_total` and `batch` only.
 public struct Timing: Codable, Sendable, Equatable {
-    public var msTokenize: Double
-    public var msInfer: Double
+    public var msTokenize: Double?
+    public var msInfer: Double?
     public var msTotal: Double
     public var batch: Int
-    public var paddedLen: Int
+    public var paddedLen: Int?
 
     enum CodingKeys: String, CodingKey {
         case msTokenize = "ms_tokenize", msInfer = "ms_infer", msTotal = "ms_total", batch, paddedLen = "padded_len"
@@ -73,7 +74,28 @@ public struct DecideResponse: Codable, Sendable {
     public var usage: Usage?
     public var timing: Timing?
     /// `[P(contradiction), P(entailment), P(neutral)]` per question, local server only.
+    /// The Laya server sends `{noul, act_probability, temperature}` objects instead; those decode as nil.
     public var raw: [String: [Double]]?
+
+    public init(model: String, answers: [String: Answer], usage: Usage? = nil, timing: Timing? = nil,
+                raw: [String: [Double]]? = nil) {
+        self.model = model
+        self.answers = answers
+        self.usage = usage
+        self.timing = timing
+        self.raw = raw
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        model = try c.decode(String.self, forKey: .model)
+        answers = try c.decode([String: Answer].self, forKey: .answers)
+        usage = try c.decodeIfPresent(Usage.self, forKey: .usage)
+        timing = try c.decodeIfPresent(Timing.self, forKey: .timing)
+        raw = try? c.decodeIfPresent([String: [Double]].self, forKey: .raw)
+    }
+
+    enum CodingKeys: String, CodingKey { case model, answers, usage, timing, raw }
 }
 
 public enum DeciderError: Error, CustomStringConvertible {

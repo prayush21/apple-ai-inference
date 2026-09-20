@@ -33,11 +33,13 @@ public struct BenchStats: Encodable, Sendable {
 public struct BenchRow: Encodable, Sendable {
     public var asset: String
     public var N: Int
-    public var L: Int
+    /// nil for the Laya backend (no padded length to pin; encodes as JSON null like bench.py's rows).
+    public var L: Int?
     public var firstCallMs: Double
     public var httpOverheadP50Ms: Double
     public var roundtripMs: BenchStats
-    public var serverInferMs: BenchStats
+    /// nil for the Laya backend, whose server reports no tokenize / infer split.
+    public var serverInferMs: BenchStats?
     public var serverTotalMs: BenchStats
 
     enum CodingKeys: String, CodingKey {
@@ -49,11 +51,25 @@ public struct BenchRow: Encodable, Sendable {
         case serverTotalMs = "server_total_ms"
     }
 
-    public init(asset: String, N: Int, L: Int, firstCallMs: Double, httpOverheadP50Ms: Double,
-                roundtripMs: BenchStats, serverInferMs: BenchStats, serverTotalMs: BenchStats) {
+    public init(asset: String, N: Int, L: Int?, firstCallMs: Double, httpOverheadP50Ms: Double,
+                roundtripMs: BenchStats, serverInferMs: BenchStats?, serverTotalMs: BenchStats) {
         self.asset = asset; self.N = N; self.L = L
         self.firstCallMs = firstCallMs; self.httpOverheadP50Ms = httpOverheadP50Ms
         self.roundtripMs = roundtripMs; self.serverInferMs = serverInferMs; self.serverTotalMs = serverTotalMs
+    }
+
+    // `L` is written as an explicit null (JSONEncoder would drop the key), matching bench.py's Laya rows;
+    // `server_infer_ms` is simply absent when the server reports no split.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(asset, forKey: .asset)
+        try c.encode(N, forKey: .N)
+        if let L { try c.encode(L, forKey: .L) } else { try c.encodeNil(forKey: .L) }
+        try c.encode(firstCallMs, forKey: .firstCallMs)
+        try c.encode(httpOverheadP50Ms, forKey: .httpOverheadP50Ms)
+        try c.encode(roundtripMs, forKey: .roundtripMs)
+        try c.encodeIfPresent(serverInferMs, forKey: .serverInferMs)
+        try c.encode(serverTotalMs, forKey: .serverTotalMs)
     }
 }
 
