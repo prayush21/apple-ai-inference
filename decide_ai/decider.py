@@ -208,15 +208,17 @@ class JevDecider:
 
     name = "jev"
 
-    def __init__(self, *, use_cache: bool = True) -> None:
+    def __init__(self, *, use_cache: bool = True, cache_path: Path | None = None) -> None:
         self.use_cache = use_cache
+        self.cache_path = cache_path
 
     def evaluate(self, state: str, questions: dict, *, length: int | None = None) -> tuple[dict, dict, dict, dict]:
         from . import jev
 
         # Jev gets the question form only; ``hypothesis`` is a local-model concern.
         qs = {n: {"type": q["type"], "instructions": q["instructions"]} for n, q in questions.items()}
-        answers, usage, ms = jev.evaluate(state, qs, use_cache=self.use_cache)
+        kw = {"cache_path": self.cache_path} if self.cache_path else {}
+        answers, usage, ms = jev.evaluate(state, qs, use_cache=self.use_cache, **kw)
         timing = {"ms_total": ms, "batch": len(questions), "cached": jev.last_was_cached}
         return answers, usage, timing, {}
 

@@ -14,7 +14,8 @@ the 2026-09-19 probe (``scripts/probe_jev.py``) made necessary:
 * **Pacing** at <= 25 req/min (>= 2.4 s between live calls; the gateway limit
   is 30/min per team). Cache hits do not sleep.
 * **429** -> parse ``Retry after Ns`` from the body (or the ``Retry-After``
-  header), sleep, retry. **5xx** -> exponential backoff, 5 attempts. Other
+  header), sleep, retry. **5xx and transport errors** (read timeout, reset)
+  -> exponential backoff, 5 attempts, counted in ``transient_errors``. Other
   4xx are raised immediately.
 * **TLS**: this venv's CPython is a python.org build that does not see the
   macOS keychain, so ``urlopen`` needs ``certifi``'s CA bundle.
@@ -78,19 +79,19 @@ def cache_key(body: bytes) -> str:
 
 # --------------------------------------------------------------------------- cache
 
-_cache: dict[str, dict] | None = None
+_caches: dict[Path, dict[str, dict]] = {}
 
 
 def _load_cache(path: Path) -> dict[str, dict]:
-    global _cache
-    if _cache is None:
-        _cache = {}
+    if path not in _caches:
+        cache: dict[str, dict] = {}
         if path.exists():
             for line in path.read_text().splitlines():
                 if line.strip():
                     rec = json.loads(line)
-                    _cache[rec["key"]] = rec  # last write wins
-    return _cache
+                    cache[rec["key"]] = rec  # last write wins
+        _caches[path] = cache
+    return _caches[path]
 
 
 def _append_cache(path: Path, rec: dict) -> None:
@@ -151,7 +152,18 @@ def _post(body: bytes, timeout: float) -> tuple[dict, float]:
                 backoff *= 2
                 continue
             raise JevHTTPError(e.code, text) from None
+        except (TimeoutError, urllib.error.URLError, ConnectionError, OSError) as e:
+            transient_errors.append(f"{type(e).__name__}: {e}")
+            if attempt == 4:
+                raise
+            print(f"  jev: {type(e).__name__}, retrying in {backoff:.0f}s", file=sys.stderr, flush=True)
+            time.sleep(backoff)
+            backoff *= 2
     raise JevHTTPError(429, "gave up after repeated 429s")
+
+
+# One entry per transport-level failure that was retried (bench records the count).
+transient_errors: list[str] = []
 
 
 # --------------------------------------------------------------------------- API
