@@ -226,9 +226,13 @@ class JevDecider:
 def make_backend(name: str, *, models_dir: Path = Path("models/decide"), hf_dir: Path | None = None,
                  max_len: int = 128, temperature: float | None = None, score: str = "entail",
                  use_cache: bool = True):
-    """``local-static`` | ``local-dynamic`` | ``jev`` -> a decider with ``.evaluate``."""
+    """``local-static`` | ``local-dynamic`` | ``jev`` | ``laya`` -> a decider with ``.evaluate``."""
     if name == "jev":
         return JevDecider(use_cache=use_cache)
+    if name == "laya":
+        from .laya import DEFAULT_HF_DIR, LayaDecider
+
+        return LayaDecider(hf_dir or DEFAULT_HF_DIR)
     if name.startswith("local-"):
         from .download import model_dir
 

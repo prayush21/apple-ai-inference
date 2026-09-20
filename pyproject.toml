@@ -26,6 +26,7 @@ decide-verify = "decide_ai.verify:main"
 decide-calibrate = "decide_ai.calibrate:main"
 decide-serve = "decide_ai.serve:main"
 decide-bench = "decide_ai.bench:main"
+decide-laya = "decide_ai.laya:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -36,3 +37,4 @@ include = ["snake_ai*", "decide_ai*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: loads a large checkpoint (Laya, ~1 min); deselect with -m 'not slow'"]
