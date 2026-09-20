@@ -2,13 +2,14 @@
 
     python -m decide_ai.calibrate                       # -> docs/bench/decide-quality.md, models/decide/calibration.json
     python -m decide_ai.calibrate --backends local-static jev
+    python -m decide_ai.calibrate --backend laya --out /tmp/laya-only.md   # one backend, ~3 min
     python -m decide_ai.calibrate --dry-run             # unreviewed labels: print, write nothing
     python -m decide_ai.calibrate --no-cache            # force live Jev calls (both passes)
 
 Refuses to write quality numbers unless ``data/decide/holdout_review.md``
 starts with ``reviewed: true``.
 
-For each backend (``local-dynamic``, ``local-static``, ``jev``) every holdout
+For each backend (``local-dynamic``, ``local-static``, ``jev``, ``laya``) every holdout
 state is scored on the five questions in one request (the local model runs
 the five hypotheses as one batch), then per question and pooled:
 
@@ -28,6 +29,14 @@ before / after on the eval split. ``T`` is saved to
 ``models/decide/calibration.json`` and ``serve.py`` applies it. The
 ``entail_vs_contra`` scoring (renormalise over entailment + contradiction,
 ignoring neutral) is reported as its own row.
+
+Laya extras: its ``probability`` already carries the checkpoint's shipped
+``noul`` temperature (1.98 from ``rl_agent_config.json``) and is reported
+as-is first. A second row refits a single ``T`` on the same 100 / 50 split
+as the local model, from the two-way logit recovered as ``logit(p) * 1.98``
+(``noul`` is rounded to 4 dp by the checkpoint's API, so the logit is
+clipped at |9.9|). Both rows are shown; nothing is re-temperatured silently.
+Laya is asserted bit-identical on the repeat subset like the local model.
 """
 
 from __future__ import annotations
@@ -47,7 +56,7 @@ from .jev import JevUnavailable
 
 QUALITY_PATH = Path("docs/bench/decide-quality.md")
 REPEAT_CACHE = Path("data/decide/jev_repeat_cache.jsonl")
-BACKENDS = ["local-dynamic", "local-static", "jev"]
+BACKENDS = ["local-dynamic", "local-static", "jev", "laya"]
 N_BINS = 10
 
 
@@ -118,25 +127,66 @@ def pooled(rows: list[dict], scores: dict, key=lambda s, q: s["p"][q]) -> dict:
     return {"pooled": metrics(labels, probs), "per_question": per_q}
 
 
-def fit_temperature(rows: list[dict], scores: dict) -> float:
-    """Grid + refine search for T minimising binary NLL of P(entail | logits / T)."""
-    logits, y = [], []
+def _search_temperature(nll) -> float:
+    """Grid + refine search for the T minimising ``nll(T)``."""
+    grid = np.exp(np.linspace(np.log(0.05), np.log(20), 200))
+    best = min(grid, key=nll)
+    fine = np.exp(np.linspace(np.log(best / 1.5), np.log(best * 1.5), 200))
+    return float(min(fine, key=nll))
+
+
+def _labeled(rows: list[dict], scores: dict, value) -> tuple[list, np.ndarray]:
+    """``value(score, q)`` for every true / false cell, with the 0 / 1 targets."""
+    xs, y = [], []
     for r in rows:
         for q in QUESTION_KEYS:
             lab = r["labels"][q]
             if lab is True or lab is False:
-                logits.append(np.log(np.array(scores[r["id"]]["raw"][q]) + 1e-12))
+                xs.append(value(scores[r["id"]], q))
                 y.append(1.0 if lab else 0.0)
-    logits, y = np.array(logits), np.array(y)
+    return xs, np.array(y)
+
+
+def fit_temperature(rows: list[dict], scores: dict) -> float:
+    """T minimising binary NLL of P(entail | logits / T) for the local 3-way model."""
+    logits, y = _labeled(rows, scores, lambda s, q: np.log(np.array(s["raw"][q]) + 1e-12))
+    logits = np.array(logits)
 
     def nll(T):
         p = np.clip(probabilities(logits, T), 1e-6, 1 - 1e-6)
         return float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean())
 
-    grid = np.exp(np.linspace(np.log(0.05), np.log(20), 200))
-    best = min(grid, key=nll)
-    fine = np.exp(np.linspace(np.log(best / 1.5), np.log(best * 1.5), 200))
-    return float(min(fine, key=nll))
+    return _search_temperature(nll)
+
+
+# Laya's noul is rounded to 4 dp by its API, so 0.0 / 1.0 occur; clip before the logit.
+LAYA_CLIP = 5e-5
+
+
+def laya_logit(score: dict, q: str) -> float:
+    """The two-way logit before Laya's shipped temperature: logit(p) * T_shipped."""
+    p = min(max(score["raw"][q]["noul"], LAYA_CLIP), 1 - LAYA_CLIP)
+    return float(np.log(p / (1 - p)) * score["raw"][q]["temperature"])
+
+
+def fit_temperature_laya(rows: list[dict], scores: dict) -> float:
+    """T minimising binary NLL of sigmoid(logit / T) on Laya's recovered two-way logits."""
+    z, y = _labeled(rows, scores, laya_logit)
+    z = np.array(z)
+
+    def nll(T):
+        p = np.clip(1 / (1 + np.exp(-z / T)), 1e-6, 1 - 1e-6)
+        return float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean())
+
+    return _search_temperature(nll)
+
+
+def rescored_laya(scores: dict, temperature: float) -> dict:
+    out = {}
+    for sid, s in scores.items():
+        p = {q: float(1 / (1 + np.exp(-laya_logit(s, q) / temperature))) for q in QUESTION_KEYS}
+        out[sid] = {**s, "p": p}
+    return out
 
 
 def rescored(scores: dict, temperature: float, score: str) -> dict:
@@ -180,7 +230,8 @@ def write_report(path: Path, results: list[dict], rows: list[dict], notes: list[
          + ", ".join(f"{k} {v}" for k, v in cats.items()) + ".",
          "Accuracy / ECE / Brier exclude cells labeled *unsure*; **hedging** is mean |p − 0.5| on those cells "
          "(lower is better). **Repeatability** is mean / max |p₁ − p₂| over a fixed 30-state subset scored twice. "
-         "Latency is the per-state call (5 questions) as measured in this run; Jev's from the first live pass. "
+         "Latency is the per-state call (5 questions) as measured in this run; Jev's from the first live pass; "
+         "Laya's is PyTorch fp32 on the CPU. "
          "Accuracy is at p ≥ 0.5 — read it against the per-question yes-rate below, because a model that never "
          "says yes scores the base rate. AUC is threshold-free (pooled over all 5 questions' cells).", "",
          "| backend | accuracy | ECE | Brier | hedging | AUC | repeatability mean / max | latency p50 / p95 ms |",
@@ -225,7 +276,7 @@ def write_report(path: Path, results: list[dict], rows: list[dict], notes: list[
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--backends", nargs="+", default=BACKENDS)
+    ap.add_argument("--backends", "--backend", nargs="+", default=BACKENDS)
     ap.add_argument("--max-len", type=int, default=128)
     ap.add_argument("--no-cache", action="store_true", help="live Jev calls for both passes")
     ap.add_argument("--dry-run", action="store_true", help="run on unreviewed labels; print only")
@@ -250,7 +301,7 @@ def main(argv: list[str] | None = None) -> None:
             continue
         try:
             scores = score_backend(backend, rows, questions, label=name)
-        except JevUnavailable as e:
+        except (JevUnavailable, FileNotFoundError) as e:
             print(f"skip {name}: {e}")
             continue
         lat = latency(scores)
@@ -266,6 +317,27 @@ def main(argv: list[str] | None = None) -> None:
                          + f". Quality gaps smaller than ~{rep['mean']:.2f} are ties.")
             notes.append(f"Jev latency: {lat['cached']} of {lat['n']} first-pass calls came from the cache "
                          "(their ms is the latency recorded when the entry was made).")
+            continue
+
+        if name == "laya":
+            second = score_backend(backend, subset, questions, label="laya repeat pass")
+            rep = repeatability(subset, scores, second)
+            assert rep["max"] == 0.0, f"Laya not deterministic: {rep}"
+            T0 = backend.temperature
+            results.append({"name": f"laya (shipped T={T0:.2f})", "metrics": pooled(rows, scores),
+                            "repeatability": rep, "latency": lat})
+            fit_rows = [r for r in rows if r["id"] % 3 != 0]
+            eval_rows = [r for r in rows if r["id"] % 3 == 0]
+            T = fit_temperature_laya(fit_rows, scores)
+            before = pooled(eval_rows, scores)["pooled"]
+            after = pooled(eval_rows, rescored_laya(scores, T))["pooled"]
+            notes.append(f"laya: shipped noul temperature {T0:.2f} (rl_agent_config.json) is what the first row "
+                         f"reports; refit T = {T:.2f} by NLL on {len(fit_rows)} states; on the {len(eval_rows)} "
+                         f"held-out states ECE {before['ece']:.3f} → {after['ece']:.3f}, Brier {before['brier']:.3f} → "
+                         f"{after['brier']:.3f}, accuracy {before['accuracy']:.3f} → {after['accuracy']:.3f}. "
+                         f"Load {backend.load_ms / 1e3:.0f} s (fp16 safetensors → fp32, PyTorch CPU).")
+            results.append({"name": f"laya (refit T={T:.2f})", "metrics": pooled(rows, rescored_laya(scores, T)),
+                            "repeatability": rep, "latency": lat})
             continue
 
         # local: raw, temperature-scaled, entail-vs-contra
