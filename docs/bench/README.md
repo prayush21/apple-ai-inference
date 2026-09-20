@@ -1,0 +1,77 @@
+# Latency records
+
+Every path that runs a model writes a JSON record here so the numbers survive
+the terminal and can be diffed once `CoreAI.framework` is available
+in-process (macOS 27). All numbers below were measured on the same machine:
+Apple M2, macOS 26.3, Python 3.12.1, `coreai-core 1.0.0b2` (its self-contained
+CPU runtime — see `docs/coreai-ecosystem.md` gotcha 13).
+
+## Snake (`snake-bench/1`)
+
+| File | Path |
+|---|---|
+| `python.json` | `python -m snake_ai.play --player all --games 5 --json` — Python in-process |
+| `swift-remote.json` | `snake-cli --ai model --json` — Swift → `snake_ai.serve` over HTTP |
+
+Per move, decode asset: 3.8 ms in-process, 6.8 ms round trip from Swift
+(4.3 ms of it server-side).
+
+## Decide (`decide-bench/1`)
+
+| File | Path |
+|---|---|
+| `decide-python.json` | `python -m decide_ai.bench --backend local` — Python in-process, both assets |
+| `decide-remote.json` | `python -m decide_ai.bench --backend remote` — Python → `decide_ai.serve` over HTTP |
+| `decide-swift-remote.json` | `decide-cli --bench` — Swift `RemoteDecider` → `decide_ai.serve` over HTTP |
+| `decide-jev.json` | `python -m decide_ai.bench --backend jev --no-cache` — TypeSafe Jev via the Vercel AI Gateway |
+
+Rows are N questions per request × padded length L (real holdout states,
+`data/decide/bench_questions.json`). Local / HTTP rows: 20 warm-ups, then
+up to 200 timed calls capped at 60 s wall-clock per row (never fewer than
+30; `count` in each record says how many ran). Jev rows: 5 warm-ups, 30
+timed live calls per N, paced at 25 req/min because the gateway allows 30
+(~4 min for the matrix); Jev answers all N questions in one call and has
+no L. Cells are **p50 / p95 ms**.
+
+| N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` | Jev via gateway |
+|---|---|---|---|---|---|---|
+| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 |
+| 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | — (macOS 27) | — |
+| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 |
+| 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | — (macOS 27) | — |
+| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 |
+| 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | — (macOS 27) | — |
+| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — |
+| 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | — (macOS 27) | — |
+
+Jev's post claims 70–500 ms; measured from this machine the warm round
+trip is p50 255–280 ms with a p95 of 380–560 ms, and the first (cold) call
+of each run was 0.9–2.3 s. One of the 105 live calls hit a 30 s read
+timeout and was retried (recorded as `transient_errors_retried`).
+
+Reading the table:
+
+- **The HTTP hop is free.** Python→HTTP and Swift→HTTP round trips are
+  within 0.7–4.6 ms of the server's own `ms_infer` at every shape; the
+  Swift column at 1 × 64 (218 ms) is lower than the Python in-process
+  dynamic number (293) only because the server runs the static asset.
+- **Cost is linear in N × L**, so pad to the smallest enumerated L that
+  fits — 64 covers every message in the holdout — and the 5-question
+  triage request lands in the 8 × 64 row (~1.7 s here).
+- **Static vs dynamic** is a 25 % win at 1 × 64 (219 vs 293 ms: no
+  per-call type inference) and noise elsewhere; the static half of the
+  matrix ran second, on a warmer machine, and reads slower at N ≥ 8.
+- **Jev at ~270 ms is faster than this model on the interim CPU runtime**
+  for anything beyond one short question. The runtime's matmul kernel does
+  ~25 GFLOP/s (PyTorch on the same CPU runs the forward in 29 ms), so the
+  `CoreAI.framework` column, blank until macOS 27, is the one that decides
+  the on-device thesis. What is already true today: the local path has no
+  cold start beyond the ~300 ms model load, a p95/p50 ratio of ~1.2 vs
+  Jev's 1.4–2.0, bit-identical outputs across runs, and nothing leaves the
+  machine.
+- **Tokens.** Jev meters ~250 template tokens plus the state and ~18 output
+  tokens per question (284 / 328 / 382 in, 23 / 77 / 150 out for 1 / 4 / 8
+  questions); the local request is the raw pair length, 30–60 tokens per
+  question, and no output tokens. Recorded, not explained.
+
+Quality on the human-reviewed holdout is in `decide-quality.md`.

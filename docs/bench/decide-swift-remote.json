@@ -1,0 +1,270 @@
+{
+  "config" : {
+    "backend" : "swift-remote",
+    "budget_s" : "60.0",
+    "calls" : "200",
+    "inputs" : "data\/decide\/holdout.jsonl states x data\/decide\/bench_questions.json",
+    "min_calls" : "30",
+    "note" : "count per row is capped by budget_s; same matrix and inputs as decide_ai.bench",
+    "url" : "http:\/\/127.0.0.1:8770",
+    "warmup" : "20"
+  },
+  "host" : {
+    "chip" : "Apple M2",
+    "machine" : "arm64",
+    "macos" : "Version 26.3 (Build 25D125)"
+  },
+  "recorded_at" : "2026-09-20T05:33:55Z",
+  "rows" : [
+    {
+      "L" : 64,
+      "N" : 1,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 255.393041,
+      "http_overhead_p50_ms" : 1.5347710000000063,
+      "roundtrip_ms" : {
+        "count" : 200,
+        "max" : 382.135375,
+        "mean" : 224.304296275,
+        "min" : 213.435209,
+        "p50" : 218.316771,
+        "p95" : 255.37305209999985
+      },
+      "server_infer_ms" : {
+        "count" : 200,
+        "max" : 348.608,
+        "mean" : 222.37175999999997,
+        "min" : 211.955,
+        "p50" : 216.59550000000002,
+        "p95" : 253.37159999999992
+      },
+      "server_total_ms" : {
+        "count" : 200,
+        "max" : 348.953,
+        "mean" : 222.61081000000004,
+        "min" : 212.065,
+        "p50" : 216.78199999999998,
+        "p95" : 253.7807499999999
+      }
+    },
+    {
+      "L" : 128,
+      "N" : 1,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 432.418334,
+      "http_overhead_p50_ms" : 1.4779589999999985,
+      "roundtrip_ms" : {
+        "count" : 137,
+        "max" : 643.153542,
+        "mean" : 439.4757767372262,
+        "min" : 417.796041,
+        "p50" : 431.929959,
+        "p95" : 489.1575243999998
+      },
+      "server_infer_ms" : {
+        "count" : 137,
+        "max" : 640.845,
+        "mean" : 437.60444525547456,
+        "min" : 416.281,
+        "p50" : 430.303,
+        "p95" : 486.9351999999998
+      },
+      "server_total_ms" : {
+        "count" : 137,
+        "max" : 640.971,
+        "mean" : 437.761905109489,
+        "min" : 416.405,
+        "p50" : 430.452,
+        "p95" : 487.1719999999998
+      }
+    },
+    {
+      "L" : 64,
+      "N" : 4,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 848.669292,
+      "http_overhead_p50_ms" : 1.5909580000000005,
+      "roundtrip_ms" : {
+        "count" : 69,
+        "max" : 1224.766791,
+        "mean" : 869.5970157101445,
+        "min" : 818.858208,
+        "p50" : 847.373958,
+        "p95" : 1025.7717921999995
+      },
+      "server_infer_ms" : {
+        "count" : 69,
+        "max" : 1221.698,
+        "mean" : 867.4798260869562,
+        "min" : 815.874,
+        "p50" : 845.509,
+        "p95" : 1023.0531999999995
+      },
+      "server_total_ms" : {
+        "count" : 69,
+        "max" : 1222.139,
+        "mean" : 867.7809420289854,
+        "min" : 816.099,
+        "p50" : 845.783,
+        "p95" : 1023.3927999999996
+      }
+    },
+    {
+      "L" : 128,
+      "N" : 4,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 1637.622417,
+      "http_overhead_p50_ms" : 1.7383330000000115,
+      "roundtrip_ms" : {
+        "count" : 35,
+        "max" : 2058.678625,
+        "mean" : 1742.1696131428569,
+        "min" : 1625.438959,
+        "p50" : 1704.442333,
+        "p95" : 1990.7351000999997
+      },
+      "server_infer_ms" : {
+        "count" : 35,
+        "max" : 2053.463,
+        "mean" : 1739.0714285714287,
+        "min" : 1622.93,
+        "p50" : 1702.32,
+        "p95" : 1982.1781999999998
+      },
+      "server_total_ms" : {
+        "count" : 35,
+        "max" : 2054.01,
+        "mean" : 1739.4804,
+        "min" : 1623.209,
+        "p50" : 1702.704,
+        "p95" : 1982.9661999999998
+      }
+    },
+    {
+      "L" : 64,
+      "N" : 8,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 1723.072208,
+      "http_overhead_p50_ms" : 1.723084000000199,
+      "roundtrip_ms" : {
+        "count" : 35,
+        "max" : 2066.397041,
+        "mean" : 1751.3160119428571,
+        "min" : 1628.72375,
+        "p50" : 1725.795084,
+        "p95" : 1941.8578125
+      },
+      "server_infer_ms" : {
+        "count" : 35,
+        "max" : 2062.736,
+        "mean" : 1748.4372571428569,
+        "min" : 1626.388,
+        "p50" : 1723.598,
+        "p95" : 1938.0291999999997
+      },
+      "server_total_ms" : {
+        "count" : 35,
+        "max" : 2063.448,
+        "mean" : 1749.0252285714287,
+        "min" : 1626.871,
+        "p50" : 1724.072,
+        "p95" : 1938.8565999999998
+      }
+    },
+    {
+      "L" : 128,
+      "N" : 8,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 3582.790292,
+      "http_overhead_p50_ms" : 1.6052294999999503,
+      "roundtrip_ms" : {
+        "count" : 30,
+        "max" : 3557.399292,
+        "mean" : 3293.8980181666657,
+        "min" : 3230.404667,
+        "p50" : 3257.9977295,
+        "p95" : 3518.85734405
+      },
+      "server_infer_ms" : {
+        "count" : 30,
+        "max" : 3555.117,
+        "mean" : 3291.632866666667,
+        "min" : 3228.413,
+        "p50" : 3255.8869999999997,
+        "p95" : 3516.35535
+      },
+      "server_total_ms" : {
+        "count" : 30,
+        "max" : 3555.54,
+        "mean" : 3292.102466666666,
+        "min" : 3228.837,
+        "p50" : 3256.3925,
+        "p95" : 3516.8539499999997
+      }
+    },
+    {
+      "L" : 64,
+      "N" : 16,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 3509.397208,
+      "http_overhead_p50_ms" : 3.8086874999999054,
+      "roundtrip_ms" : {
+        "count" : 30,
+        "max" : 3576.284334,
+        "mean" : 3319.651091733332,
+        "min" : 3214.008375,
+        "p50" : 3288.0491875,
+        "p95" : 3550.65822485
+      },
+      "server_infer_ms" : {
+        "count" : 30,
+        "max" : 3571.025,
+        "mean" : 3315.638966666667,
+        "min" : 3211.451,
+        "p50" : 3283.3285,
+        "p95" : 3546.2118
+      },
+      "server_total_ms" : {
+        "count" : 30,
+        "max" : 3572.46,
+        "mean" : 3316.6227999999996,
+        "min" : 3212.236,
+        "p50" : 3284.2405,
+        "p95" : 3547.2116
+      }
+    },
+    {
+      "L" : 128,
+      "N" : 16,
+      "asset" : "NLICrossEncoderStatic.aimodel",
+      "first_call_ms" : 6589.828917,
+      "http_overhead_p50_ms" : 4.6465415000002395,
+      "roundtrip_ms" : {
+        "count" : 30,
+        "max" : 6945.554333,
+        "mean" : 6658.199255633333,
+        "min" : 6516.004292,
+        "p50" : 6629.9210415,
+        "p95" : 6899.40543545
+      },
+      "server_infer_ms" : {
+        "count" : 30,
+        "max" : 6938.717,
+        "mean" : 6652.436300000001,
+        "min" : 6513.202,
+        "p50" : 6622.878,
+        "p95" : 6891.18025
+      },
+      "server_total_ms" : {
+        "count" : 30,
+        "max" : 6940.05,
+        "mean" : 6654.052166666666,
+        "min" : 6514.271,
+        "p50" : 6625.2744999999995,
+        "p95" : 6892.61965
+      }
+    }
+  ],
+  "runtime" : "coreai.runtime via decide_ai.serve (HTTP from Swift)",
+  "schema" : "decide-bench\/1"
+}
