@@ -389,12 +389,12 @@ records and method in [`docs/bench/README.md`](docs/bench/README.md)):
 
 Jev's post claims 70–500 ms; measured, the warm round trip is p50 255–280 /
 p95 380–560 ms, first call 0.9–2.3 s. The HTTP hop from Python or Swift
-costs 0.7–4.6 ms (0.8–3.6 ms in front of the Laya server too). Laya pads
-to its own sequence, so it has N rows only. Its column was taken on a
-quiet machine; under a load average of 4–8 from other apps its p50s
-doubled and p95s reached 6 s, so every Laya record carries `loadavg_1m`
-(the HTTP records in `docs/bench/` are from the busy session). Load is
-35–55 s. **The local numbers are the interim macOS 26 CPU runtime,
+costs 0.7–4.6 ms (0.8–1.6 ms in front of the Laya server, whose
+Python→HTTP and Swift→HTTP round trips are 130–135 / 255–265 / 448 /
+900 ms). Laya pads to its own sequence, so it has N rows only. Its
+records were taken on a quiet machine; under a load average of 4–8 from
+other apps its p50s doubled and p95s reached 6 s, so every Laya record
+carries `loadavg_1m`. Load is 35–55 s. **The local numbers are the interim macOS 26 CPU runtime,
 whose matmul runs at ~25 GFLOP/s** (PyTorch does this forward in 29 ms on
 the same CPU; gotcha 13 in the ecosystem doc). So on this machine the
 on-device path only breaks even with Jev for one short question; the

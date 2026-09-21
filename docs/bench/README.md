@@ -52,21 +52,20 @@ and pads to its own sequence (max 512), so it has no L either. Cells are
 
 Laya over HTTP (same server shape as the local columns, `decide_ai.serve
 --backend laya` on :8771), round trip p50 / p95 ms and the HTTP+JSON
-overhead at p50: Python→HTTP 149 / 554 (0.8 ms), 316 / 2058 (0.9),
-630 / 1544 (1.3), 1328 / 2633 (2.4); Swift→HTTP 173 / 958 (1.7 ms),
-347 / 1144 (2.3), 977 / 1997 (3.6), 1242 / 2245 (2.6) for N = 1 / 4 / 8 / 16.
+overhead at p50: Python→HTTP 130 / 141 (0.8 ms), 255 / 285 (0.8),
+448 / 503 (0.9), 902 / 985 (0.9); Swift→HTTP 135 / 142 (1.5 ms),
+265 / 303 (1.6), 449 / 533 (1.6), 897 / 1039 (1.6) for N = 1 / 4 / 8 / 16.
 
-**Read every Laya record with its `loadavg_1m` field.** The in-process
-column above was taken on a quiet machine (load average 3.4 → 2.9; Chrome
-closed) and has a p95/p50 of ~1.1. The two HTTP records were taken
-earlier the same day with a load average of 4–8 from other applications
-on the same 8-core M2, which is what their p95s are; their per-row
-minimums (128 / 256 / 473 / 984 ms) sit where the quiet in-process p50s
-do, so subtract the load, not the hop. Three in-process runs under that
-load gave p50 155 / 918 / 926 / 2194, 289 / 456 / 716 / 1278 and 135 /
-322 / 990 / 1225 with p95s up to 6 s — the 421M model is far more
-sensitive to a busy machine than the 82M one. Load: 35–55 s (fp16
-safetensors → fp32 module), first call after load 0.25–1.3 s.
+**Read every Laya record with its `loadavg_1m` field.** All three Laya
+records above were taken on a quiet machine (load average ~3, Chrome
+closed) and have a p95/p50 of ~1.1. Earlier the same day, with a load
+average of 4–8 from other applications on the same 8-core M2, three
+in-process runs gave p50 155 / 918 / 926 / 2194, 289 / 456 / 716 / 1278
+and 135 / 322 / 990 / 1225 with p95s up to 6 s, and the HTTP columns
+read 630–977 ms at N = 8 — the per-row minimums never moved, so the
+421M model's floor is stable but it is far more sensitive to a busy
+machine than the 82M one. Load: 35–55 s (fp16 safetensors → fp32
+module), first call after load 0.2–1.3 s.
 
 Jev's post claims 70–500 ms; measured from this machine the warm round
 trip is p50 255–280 ms with a p95 of 380–560 ms, and the first (cold) call
