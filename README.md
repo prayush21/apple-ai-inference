@@ -378,22 +378,23 @@ records and method in [`docs/bench/README.md`](docs/bench/README.md)):
 
 | N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` | Jev via gateway | Laya (PyTorch, CPU) |
 |---|---|---|---|---|---|---|---|
-| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 | 135 / 165 |
+| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 | 123 / 133 |
 | 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | — (macOS 27) | — | — |
-| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 | 322 / 748 |
+| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 | 243 / 271 |
 | 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | — (macOS 27) | — | — |
-| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 | 990 / 1638 |
+| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 | 422 / 478 |
 | 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | — (macOS 27) | — | — |
-| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — | 1225 / 2240 |
+| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — | 854 / 954 |
 | 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | — (macOS 27) | — | — |
 
 Jev's post claims 70–500 ms; measured, the warm round trip is p50 255–280 /
 p95 380–560 ms, first call 0.9–2.3 s. The HTTP hop from Python or Swift
 costs 0.7–4.6 ms (0.8–3.6 ms in front of the Laya server too). Laya pads
-to its own sequence, so it has N rows only; its numbers were taken with a
-load average of 4–8 from other apps (recorded in the JSON), and the
-per-row minimums (128 / 233 / 515 / 991 ms) are the model's cost while
-the p95s are the machine's. Load is 35–55 s. **The local numbers are the interim macOS 26 CPU runtime,
+to its own sequence, so it has N rows only. Its column was taken on a
+quiet machine; under a load average of 4–8 from other apps its p50s
+doubled and p95s reached 6 s, so every Laya record carries `loadavg_1m`
+(the HTTP records in `docs/bench/` are from the busy session). Load is
+35–55 s. **The local numbers are the interim macOS 26 CPU runtime,
 whose matmul runs at ~25 GFLOP/s** (PyTorch does this forward in 29 ms on
 the same CPU; gotcha 13 in the ecosystem doc). So on this machine the
 on-device path only breaks even with Jev for one short question; the
@@ -416,11 +417,11 @@ Quality on the 150-state, human-reviewed triage holdout (5 questions each;
 
 In one sentence each: **Jev wins on quality** (0.898 accuracy, AUC 0.97,
 ECE 0.039, recall 0.74–0.95 on every question) and on latency once a
-request carries 8+ questions (255 ms vs Laya's 990 and the CPU runtime's
+request carries 8+ questions (255 ms vs Laya's 422 and the CPU runtime's
 1.6 s); **Laya wins on cost-per-answer with no network** — half the accuracy
-gap between MiniLM and Jev closed (0.824, AUC 0.86) at 135 ms for one
-question and 322 ms for four, bit-deterministic, Apache 2.0, and it
-actually says yes (recall 0.58–0.90 on complaint / refund / shipping /
+gap between MiniLM and Jev closed (0.824, AUC 0.86) at 123 ms for one
+question and 243 ms for four with a p95 within 10 % of p50,
+bit-deterministic, Apache 2.0, and it actually says yes (recall 0.58–0.90 on complaint / refund / shipping /
 urgent); **MiniLM wins on footprint and the on-device path** — 82M params
 that load in 300 ms against Laya's 421M fp32 and 35–55 s, and the only
 one of the three with a `.aimodel` and a `CoreAI.framework` route.

@@ -158,7 +158,7 @@ Two reasons, recorded so nobody restarts this by accident:
   head adds a 2-layer `nn.TransformerEncoder` with a key-padding mask on top.
 
 The honest comparison today is PyTorch on the CPU (what a user without a
-GPU gets): 0.3–1.4 s for a 5-question request, ~35–60 s to load. See
+GPU gets): ~0.3 s for a 5-question request on a quiet M2, ~35–60 s to load. See
 `docs/bench/decide-laya.json`.
 
 ## Profiling and debugging from Python
