@@ -8,9 +8,12 @@ import Foundation
 //   swift run decide-cli --bench --json ../docs/bench/decide-swift-remote.json
 //   swift run decide-cli --bench --json ../docs/bench/decide-swift-remote-laya.json   # server: serve --backend laya
 //
-// On macOS 27 `--model models/decide/NLICrossEncoderStatic.aimodel` would use
-// the in-process `Decider`; there is no tokenizer in Swift yet (step 2), so
-// the CLI only offers the remote path today.
+//   swift run decide-cli --bench --model ../models/decide/NLICrossEncoderStatic.aimodel \
+//       --json ../docs/bench/decide-swift-coreai-static.json      # in-process on CoreAI.framework (macOS 27)
+//
+// `--model` runs the in-process `Decider` on pre-tokenized inputs from
+// `python -m decide_ai.bench_ids` (no Swift tokenizer until step 2), so it is
+// bench-only for now.
 
 struct Args {
     var rest = Array(CommandLine.arguments.dropFirst())
@@ -32,6 +35,51 @@ let calls = Int(a.option("--calls") ?? "200")!
 let warmup = Int(a.option("--warmup") ?? "20")!
 let minCalls = Int(a.option("--min-calls") ?? "30")!
 let budgetS = Double(a.option("--budget-s") ?? "60")!
+
+if let modelPath = a.option("--model") {
+    guard bench else { print("--model is bench-only until the Swift tokenizer lands (step 2); add --bench"); exit(1) }
+    guard let root = repoRoot() else { print("run from inside the repo (needs docs/ and data/decide/)"); exit(1) }
+    #if canImport(CoreAI)
+    guard #available(macOS 27, *) else { print("CoreAI.framework needs macOS 27"); exit(1) }
+    let modelURL = URL(fileURLWithPath: modelPath, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+    let inputs: BenchIDs
+    do { inputs = try BenchIDs.load(root: root) } catch {
+        print("cannot read data/decide/bench_ids.json (\(error)); generate it with: .venv/bin/python -m decide_ai.bench_ids"); exit(1)
+    }
+    var c = LocalBenchConfig()
+    c.warmup = warmup; c.calls = calls; c.minCalls = minCalls; c.budgetS = budgetS
+    let load0 = loadavg1m()
+    let (rows, refDiff) = try await runLocalBench(modelURL: modelURL, inputs: inputs, config: c) { print($0) }
+    if let jsonPath {
+        let record = BenchRecord(
+            runtime: "CoreAI.framework (Swift, in-process, default specialization)",
+            config: ["backend": "swift-coreai", "model": modelPath, "build": isDebugBuild ? "debug" : "release",
+                     "warmup": "\(c.warmup)", "calls": "\(c.calls)", "min_calls": "\(c.minCalls)", "budget_s": "\(c.budgetS)",
+                     "inputs": "data/decide/bench_ids.json (holdout states x bench_questions, tokenized by decide_ai.bench_ids)",
+                     "reference_max_abs_diff": String(format: "%.3g", refDiff),
+                     "loadavg_1m_before": String(format: "%.2f", load0), "loadavg_1m_after": String(format: "%.2f", loadavg1m()),
+                     "note": "infer_ms is Decider.logits: NDArray build + run + reading logits, inputs pre-tokenized and pre-padded"],
+            rows: rows)
+        let out = URL(fileURLWithPath: jsonPath, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+        try record.write(to: out)
+        print("wrote \(out.path)")
+    }
+    exit(0)
+    #else
+    print(DeciderError.coreAIUnavailable); exit(1)
+    #endif
+}
+
+#if DEBUG
+let isDebugBuild = true
+#else
+let isDebugBuild = false
+#endif
+
+func loadavg1m() -> Double {
+    var l = [0.0, 0.0, 0.0]
+    return getloadavg(&l, 3) > 0 ? l[0] : .nan
+}
 
 let decider: RemoteDecider
 do {

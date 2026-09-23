@@ -103,6 +103,7 @@ public enum DeciderError: Error, CustomStringConvertible {
     case missingFunction(String)
     case missingOutput(String)
     case server(String)
+    case referenceMismatch(Double)
 
     public var description: String {
         switch self {
@@ -110,6 +111,7 @@ public enum DeciderError: Error, CustomStringConvertible {
         case .missingFunction(let n): "model has no function named \(n)"
         case .missingOutput(let n): "model returned no output named \(n)"
         case .server(let m): "server error: \(m)"
+        case .referenceMismatch(let d): "logits differ from the Python Core AI reference by \(d) (regenerate with python -m decide_ai.bench_ids)"
         }
     }
 }

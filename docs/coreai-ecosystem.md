@@ -117,6 +117,13 @@ Observed converting `cross-encoder/nli-MiniLM2-L6-H768` (6 layers, H=768,
     is unsupported on this runtime (see above), so there is no way to reach
     them from Python. This is the interim CPU runtime, not the model: at
     5.4 GFLOP per row the OS runtime on macOS 27 should be tens of ms.
+    Measured on macOS 27.0 (2026-09-22): `CoreAI.framework` from Swift runs
+    1 × 64 in 5.3 ms and 16 × 64 in 47 ms (41–91× this runtime), same
+    asset, logits within 3e-6 — see docs/bench/README.md. Two things
+    change on macOS 27: `coreai-core` in Python switches to the OS framework
+    (`_coreai_runtime_os`) on its own, and the first load ever of an asset
+    specializes it — 2.2 s dynamic, 94–102 s for the eight-function static
+    asset, paid once by Python and once by Swift — then 10–12 ms.
     Consequence for the bench: cost scales with N·L, so pad to the
     smallest enumerated L that fits (64 covers every triage message in the
     holdout) rather than always using the ceiling.

@@ -1,10 +1,13 @@
 # Latency records
 
 Every path that runs a model writes a JSON record here so the numbers survive
-the terminal and can be diffed once `CoreAI.framework` is available
-in-process (macOS 27). All numbers below were measured on the same machine:
-Apple M2, macOS 26.3, Python 3.12.1, `coreai-core 1.0.0b2` (its self-contained
-CPU runtime — see `docs/coreai-ecosystem.md` gotcha 13).
+the terminal and can be diffed. All numbers below were measured on the same
+machine, an Apple M2. Everything except the `CoreAI.framework` column ran on
+macOS 26.3, Python 3.12.1, `coreai-core 1.0.0b2` (its self-contained CPU
+runtime — see `docs/coreai-ecosystem.md` gotcha 13). The `CoreAI.framework`
+column ran on macOS 27.0 / Xcode 27.0 (2026-09-22). On macOS 27 `coreai-core`
+loads the OS framework instead, so the Python columns are a macOS 26 baseline
+and a re-run today would not reproduce them (`USE_LOCAL_COREAI` would).
 
 ## Snake (`snake-bench/1`)
 
@@ -27,6 +30,8 @@ Per move, decode asset: 3.8 ms in-process, 6.8 ms round trip from Swift
 | `decide-laya.json` | `python -m decide_ai.bench --backend laya` — Laya (`convaiinnovations/laya`, 421M) in-process, PyTorch fp32 on the CPU |
 | `decide-remote-laya.json` | `python -m decide_ai.bench --backend remote --url :8771` — Python → `decide_ai.serve --backend laya` over HTTP |
 | `decide-swift-remote-laya.json` | `decide-cli --bench --url :8771` — Swift `RemoteDecider` → `decide_ai.serve --backend laya` over HTTP |
+| `decide-swift-coreai-dynamic.json` | `decide-cli --bench --model ../models/decide/NLICrossEncoder.aimodel` — Swift `Decider` in-process on `CoreAI.framework`, pre-tokenized inputs from `python -m decide_ai.bench_ids` |
+| `decide-swift-coreai-static.json` | the same on `NLICrossEncoderStatic.aimodel` (the column in the table) |
 
 Rows are N questions per request × padded length L (real holdout states,
 `data/decide/bench_questions.json`). Local / HTTP rows: 20 warm-ups, then
@@ -39,16 +44,33 @@ at 60 s per row; Laya also answers all N questions in one forward pass
 and pads to its own sequence (max 512), so it has no L either. Cells are
 **p50 / p95 ms**.
 
-| N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` | Jev via gateway | Laya (PyTorch, CPU) |
+| N × L | Python in-proc, dynamic | Python in-proc, static | Python→HTTP round trip | Swift→HTTP round trip | `CoreAI.framework` (Swift, in-proc, static) | Jev via gateway | Laya (PyTorch, CPU) |
 |---|---|---|---|---|---|---|---|
-| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | — (macOS 27) | 278 / 381 | 123 / 133 |
-| 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | — (macOS 27) | — | — |
-| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | — (macOS 27) | 280 / 556 | 243 / 271 |
-| 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | — (macOS 27) | — | — |
-| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | — (macOS 27) | 255 / 482 | 422 / 478 |
-| 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | — (macOS 27) | — | — |
-| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | — (macOS 27) | — | 854 / 954 |
-| 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | — (macOS 27) | — | — |
+| 1 × 64 | 293 / 392 | 219 / 269 | 281 / 336 | 218 / 255 | **5.3 / 12.0** | 278 / 381 | 123 / 133 |
+| 1 × 128 | 480 / 730 | 425 / 494 | 533 / 595 | 432 / 489 | **12.0 / 18.3** | — | — |
+| 4 × 64 | 836 / 970 | 838 / 967 | 811 / 876 | 847 / 1026 | **15.7 / 21.7** | 280 / 556 | 243 / 271 |
+| 4 × 128 | 1692 / 2155 | 1711 / 2196 | 1617 / 1718 | 1704 / 1991 | **26.2 / 28.8** | — | — |
+| 8 × 64 | 1641 / 1909 | 1795 / 2517 | 1607 / 1766 | 1726 / 1942 | **25.4 / 27.1** | 255 / 482 | 422 / 478 |
+| 8 × 128 | 3404 / 4134 | 4473 / 5444 | 3240 / 3376 | 3258 / 3519 | **47.8 / 50.4** | — | — |
+| 16 × 64 | 3325 / 3507 | 4290 / 5216 | 3418 / 4491 | 3288 / 3551 | **47.3 / 49.4** | — | 854 / 954 |
+| 16 × 128 | 6797 / 7489 | 8815 / 10321 | 6604 / 6879 | 6630 / 6899 | **93.1 / 95.5** | — | — |
+
+**`CoreAI.framework` column.** The Swift `Decider` in-process, release build,
+default specialization (the framework picks the compute unit; which one was
+not recorded). Inputs are the same holdout states × bench questions,
+tokenized once by `python -m decide_ai.bench_ids` because there is no Swift
+BPE until step 2, so a cell is `Decider.logits`: NDArray build + run +
+reading the logits, no tokenize. Before timing, each asset is checked against
+the Python Core AI logits for the first state × 16 questions (max |diff|
+6e-7 dynamic, 3e-6 static). 20 warm-ups then 200 timed calls per row (every
+row hit the cap; the load average was 3.6–4.3). The dynamic asset reads within noise of
+static: p50 / p95 4.9 / 9.4, 9.3 / 15.3, 13.3 / 15.1, 27.5 / 29.9, 26.6 /
+28.9, 47.5 / 52.1, 50.0 / 51.5, 95.4 / 100.8 in table order. **Load:** the
+first `AIModel(contentsOf:)` ever for an asset specializes it — 2.2 s for
+dynamic, **94.5 s (Python) and 101.8 s (Swift) for the eight-function static
+asset**, each runtime paying it once — and after that it is 10–12 ms from a new
+process and ~1 ms within one; `loadFunction(named:)` is 1–14 ms per
+function.
 
 Laya over HTTP (same server shape as the local columns, `decide_ai.serve
 --backend laya` on :8771), round trip p50 / p95 ms and the HTTP+JSON
@@ -84,14 +106,17 @@ Reading the table:
 - **Static vs dynamic** is a 25 % win at 1 × 64 (219 vs 293 ms: no
   per-call type inference) and noise elsewhere; the static half of the
   matrix ran second, on a warmer machine, and reads slower at N ≥ 8.
-- **Jev at ~270 ms is faster than this model on the interim CPU runtime**
-  for anything beyond one short question. The runtime's matmul kernel does
-  ~25 GFLOP/s (PyTorch on the same CPU runs the forward in 29 ms), so the
-  `CoreAI.framework` column, blank until macOS 27, is the one that decides
-  the on-device thesis. What is already true today: the local path has no
-  cold start beyond the ~300 ms model load, a p95/p50 ratio of ~1.2 vs
-  Jev's 1.4–2.0, bit-identical outputs across runs, and nothing leaves the
-  machine.
+- **On `CoreAI.framework` the on-device path wins at every shape.** Same
+  model, same asset: 41× faster than the interim CPU runtime at 1 × 64
+  (5.3 vs 219 ms) and 91× at 16 × 64 (47 vs 4290 ms). The 5-question triage
+  request (8 × 64) drops from ~1.7 s to 25 ms, 10× under Jev's 255 ms; a
+  16-question request at L = 128 (93 ms) is still 3× under one Jev call.
+  Against Laya in PyTorch it is 23× at N = 1 and 18× at N = 16. Cost is
+  still close to linear in N × L (~3 ms per 64-token row). The macOS 26
+  explanation holds: that runtime's matmul ran at ~25 GFLOP/s where PyTorch
+  does the forward in 29 ms. Also true on both runtimes: no network floor,
+  bit-identical outputs, nothing leaves the machine. p95/p50 is 1.03–1.1 at
+  N ≥ 4 except 4 × 64 (1.4); at N = 1 it is 1.5–2.3, where a 5–12 ms call feels any scheduling hiccup.
 - **Laya beats the local runtime at every N** (123 / 243 / 422 / 854 ms
   vs the static asset's 219 / 838 / 1795 / 4290 at L = 64), in plain
   PyTorch, with 421M parameters against MiniLM's 82M — which says more

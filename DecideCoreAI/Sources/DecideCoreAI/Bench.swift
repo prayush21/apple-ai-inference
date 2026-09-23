@@ -73,17 +73,17 @@ public struct BenchRow: Encodable, Sendable {
     }
 }
 
-public struct BenchRecord: Encodable, Sendable {
+public struct BenchRecord<Row: Encodable & Sendable>: Encodable, Sendable {
     public let schema = "decide-bench/1"
     public var runtime: String
     public var recordedAt: String
     public var host: [String: String]
     public var config: [String: String]
-    public var rows: [BenchRow]
+    public var rows: [Row]
 
     enum CodingKeys: String, CodingKey { case schema, runtime, host, config, rows, recordedAt = "recorded_at" }
 
-    public init(runtime: String, config: [String: String], rows: [BenchRow]) {
+    public init(runtime: String, config: [String: String], rows: [Row]) {
         self.runtime = runtime
         self.recordedAt = ISO8601DateFormatter().string(from: Date())
         self.host = [

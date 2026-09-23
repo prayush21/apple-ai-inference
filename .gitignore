@@ -17,3 +17,5 @@ models/*.txt
 models/decide/hf/
 # Hugging Face weights + tokenizer fetched by llm_ai.download (branch llm)
 models/llm/hf/
+# decide_ai.bench_ids output (derived from holdout + tokenizer; regenerate)
+data/decide/bench_ids.json
