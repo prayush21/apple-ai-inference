@@ -8,7 +8,7 @@ import CoreAI
 /// `loadFunction(named:)`, `NDArray`, `InferenceFunction.run(inputs:)`).
 /// Takes pre-tokenized ids for now; the Swift BPE port is step 2.
 @available(macOS 27, iOS 27, *)
-public struct Decider {
+public struct Decider: Sendable {
     let function: InferenceFunction
     public let functionName: String
     public let temperature: Double

@@ -333,8 +333,9 @@ attention + unpadding is a converter project of its own
 | `decide_ai/calibrate.py` | Accuracy / ECE / Brier / hedging / repeatability per backend, temperature fit → `models/decide/calibration.json`, `docs/bench/decide-quality.md` |
 | `decide_ai/serve.py` | `POST /decide` + `GET /info` on :8770 through the Core AI Python runtime, or `--backend laya` |
 | `decide_ai/bench.py` | `decide-bench/1` JSON: in-process, via HTTP, Jev, and Laya |
+| `decide_ai/eval_export.py` | The holdout as 750 (state, question) samples for the Swift Evaluations port (`data/decide/eval/`, gitignored) |
 | `decide_ai/bench_ids.py` | Pre-tokenized bench inputs + reference logits for the Swift in-process bench (`data/decide/bench_ids.json`, gitignored) |
-| `DecideCoreAI/` | Swift package: `RemoteDecider` (HTTP), `Decider` on `CoreAI.framework` (macOS 27, pre-tokenized ids), `decide-cli --bench [--model]` |
+| `DecideCoreAI/` | Swift package: `RemoteDecider` (HTTP), `Decider` on `CoreAI.framework` (macOS 27, pre-tokenized ids), `decide-cli --bench [--model]`, and `DecideEvalTests`: the holdout on Xcode 27's Evaluations framework ([`docs/bench/eval/`](docs/bench/eval/README.md)) |
 | `data/decide/` | `questions.json`, `holdout.jsonl`, `holdout_review.md`, `bench_questions.json`, Jev response caches |
 
 ### Quick start
@@ -416,7 +417,10 @@ bit-identical outputs across runs, no data egress.
 
 Quality on the 150-state, human-reviewed triage holdout (5 questions each;
 `python -m decide_ai.calibrate`, full tables in
-[`docs/bench/decide-quality.md`](docs/bench/decide-quality.md)):
+[`docs/bench/decide-quality.md`](docs/bench/decide-quality.md)). The MiniLM
+and Jev rows are also reproduced to within 0.001 by the Evaluations-framework
+port (`swift test --filter TriageHoldout`, see
+[`docs/bench/eval/`](docs/bench/eval/README.md)):
 
 | backend | accuracy | ECE | Brier | AUC | repeatability mean / max | latency p50 / p95 ms |
 |---|---|---|---|---|---|---|
@@ -477,6 +481,7 @@ you actually serve, or serve dynamic.
 - [x] `/decide` server, Python / HTTP / Swift→HTTP / Jev latency records
 - [x] Step 1b: Laya as a third backend — quality and latency measured on the same holdout and matrix
 - [x] `CoreAI.framework` latency column: Swift `Decider` in-process on macOS 27, both assets, checked against Python
+- [x] Holdout ported to Xcode 27's Evaluations framework (MiniLM on `CoreAI.framework` + Jev replay), numbers match `calibrate.py`
 - [ ] Step 2: Swift BPE port, so the in-process `Decider` takes text
 - [ ] Step 3: app UI with live confidence bars
 - [ ] Step 4: distillation from Jev (native probabilities, input-only pricing)
