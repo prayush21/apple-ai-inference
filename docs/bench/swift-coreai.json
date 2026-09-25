@@ -1,0 +1,44 @@
+{
+  "config" : {
+    "games" : 5,
+    "safe_only" : true,
+    "seed" : 100
+  },
+  "host" : {
+    "chip" : "Apple M2",
+    "machine" : "arm64",
+    "macos" : "Version 27.0 (Build 26A428)"
+  },
+  "players" : [
+    {
+      "avg_steps" : 127,
+      "draws" : 1,
+      "games" : 5,
+      "inference_ms" : {
+        "count" : 635,
+        "first_5" : 192.8382668,
+        "last_5" : 1.0351666,
+        "mean" : 2.8767759291338577,
+        "p50" : 1.283125,
+        "p95" : 1.901375
+      },
+      "label" : "CoreAI.framework (Swift, in-process)",
+      "load_ms" : {
+        "all" : [
+          361.075458,
+          10.026125,
+          7.794875,
+          10.377459,
+          7.931667
+        ],
+        "first" : 361.075458,
+        "rest_mean" : 9.0325315
+      },
+      "player" : "model",
+      "wins" : 2
+    }
+  ],
+  "recorded_at" : "2026-09-24T20:15:45Z",
+  "runtime" : "CoreAI.framework (Swift, in-process) · snake-cli, heuristic opponent",
+  "schema" : "snake-bench\/1"
+}

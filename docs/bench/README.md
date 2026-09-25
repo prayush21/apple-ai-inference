@@ -15,9 +15,11 @@ and a re-run today would not reproduce them (`USE_LOCAL_COREAI` would).
 |---|---|
 | `python.json` | `python -m snake_ai.play --player all --games 5 --json` — Python in-process |
 | `swift-remote.json` | `snake-cli --ai model --json` — Swift → `snake_ai.serve` over HTTP |
+| `swift-coreai.json` | `snake-cli --model ../models/SnakeTransformerDecode.aimodel --function main_decode --json` — Swift `ModelPlayer` in-process on `CoreAI.framework` (macOS 27, 2026-09-24) |
 
 Per move, decode asset: 3.8 ms in-process, 6.8 ms round trip from Swift
-(4.3 ms of it server-side).
+(4.3 ms of it server-side), 1.3 ms p50 on `CoreAI.framework` (same games as
+`swift-remote.json`: 2 wins, 1 draw, 127 avg steps).
 
 ## Decide (`decide-bench/1`)
 

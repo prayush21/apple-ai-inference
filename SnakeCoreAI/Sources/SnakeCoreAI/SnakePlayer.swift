@@ -36,6 +36,7 @@ public struct MinimaxPlayer: SnakePlayer {
 public enum ModelError: Error {
     case missingFunction(String)
     case missingOutput(String)
+    case missingState(String)
     case contextExhausted
     case coreAIUnavailable
     case server(String)

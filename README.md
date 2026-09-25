@@ -134,6 +134,10 @@ can be compared once `CoreAI.framework` is available in-process:
 cd SnakeCoreAI && swift run snake-cli --ai model --games 5 --json ../docs/bench/swift-remote.json   # needs serve.py running
 ```
 
+```bash
+cd SnakeCoreAI && swift run snake-cli --model ../models/SnakeTransformerDecode.aimodel --function main_decode --games 5 --json ../docs/bench/swift-coreai.json
+```
+
 The app's **Save bench** button writes `docs/bench/app-<model>-<date>.json`
 for the game just played (round-trip *and* server-side ms for the remote
 player). Current numbers on an M2, decode asset:
@@ -142,10 +146,14 @@ player). Current numbers on an M2, decode asset:
 |---|---|---|
 | Python in-process (`play.py`) | 3 ms warm cache (first in process), ~2 ms after | 3.8 ms |
 | Swift → `serve.py` over HTTP (`snake-cli`) | 185 ms first (`URLSession` warm-up + `/info` + `/reset`), ~5 ms after | 6.8 ms round trip, 4.3 ms of it server-side |
-| Swift `ModelPlayer` on `CoreAI.framework` | — needs macOS 27 | — |
+| Swift `ModelPlayer` on `CoreAI.framework` (`snake-cli --function main_decode`, macOS 27) | 361 ms first (specialization, cached after), ~9 ms after | 1.3 ms p50 (2.9 ms mean incl. first-move warm-up) |
 
-The HTTP hop costs ~2.5 ms from Swift; the remaining ~4 ms is the runtime
-itself, which is why this tiny model will not *feel* different in-process.
+The first three rows are the macOS 26 local CPU runtime; the last is the OS
+framework on macOS 27. In-process on `CoreAI.framework` the move costs ~1.3 ms,
+about 3x under the old in-process runtime and 5x under the HTTP hop. It plays
+the same games as the served model: 2 wins, 1 draw, 127.0 average steps over
+seeds 100–104 for both the stateful and the decode asset, which also shows the
+KV-cache states are updated in place.
 
 ### Swift side
 
@@ -158,9 +166,12 @@ test that proves the Swift `FeatureExtractor` matches the Python one bit-for-bit
 `ModelPlayer` is written against the `CoreAI` Swift API shown in the session
 (`AIModel(contentsOf:)`, `loadFunction(named:)`, `NDArray`,
 `InferenceFunction.run(inputs:states:)`, `InferenceFunction.MutableViews`,
-`AIModelCache`, `AIModel.specialize`) and is compiled only under
-`#if canImport(CoreAI)` — i.e. Xcode 27 / macOS 27. On older SDKs the CLI and
-app fall back to the heuristic and say so.
+`AIModelCache`, `AIModel.specialize`), compiled under `#if canImport(CoreAI)`
+and gated with `#available(macOS 27, *)`. It runs in-process on macOS 27 (the
+app prefers it over `serve.py`). On older SDKs or OSes the CLI and app fall
+back to the served model or minimax and say so. Specialization logs ANE
+warnings to stderr on first load (the int32 `position_ids` input can't go to
+the Neural Engine); they are harmless.
 
 ```bash
 .venv/bin/python -m snake_ai.serve                                                          # heuristic-taught model on :8765
