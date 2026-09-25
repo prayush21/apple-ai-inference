@@ -131,6 +131,7 @@ final class GameViewModel {
         var reasons: [String] = []
         if port == 8765, let (url, function) = Self.locateModel() {
             do {
+                guard #available(macOS 27, iOS 27, *) else { throw ModelError.coreAIUnavailable }
                 let p = try await ModelPlayer(modelURL: url, functionName: function)
                 return (p, "Core AI · \(url.lastPathComponent) (in-process)")
             } catch ModelError.coreAIUnavailable {

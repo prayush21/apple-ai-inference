@@ -67,6 +67,107 @@ program.save_asset(Path("X.aimodel"))
 
 8. **`set_static_shape_config` renames the function.** The new entrypoint is `<graph>_<config name>`; `load_function("main")` then fails with `KeyError`. Always read `model.function_names`.
 
+## BERT-style encoders (`decide_ai`, RoBERTa NLI cross-encoder)
+
+Observed converting `cross-encoder/nli-MiniLM2-L6-H768` (6 layers, H=768,
+50k-vocab byte-level BPE, 82M params) with `Dim("batch", 1..32)` and
+`Dim("seq", 1..256)` on both inputs.
+
+9. **The plain encoder converts first time.** Explicit softmax attention with
+   an additive mask, `arange(L) + 2` position ids, `F.gelu`, LayerNorm and a
+   `tanh` head all have lowerings; no rewrite was needed. Ops emitted:
+   `broadcast_in_dims / broadcast_to / cast / concat / gather_nd / gelu /
+   range / reduce_mean / reshape / rsqrt / slice / softmax / tanh / transpose`
+   plus `coreai.decomposable.broadcasting_{batch_matmul,add,mul,sub}`. Max
+   |logit diff| vs PyTorch on 20 real padded pairs: 8e-6 (dynamic), 6e-6
+   (static). Batch-of-4 equals four batches-of-1 to 2e-6, so the mask path
+   is right, and two runs of one batch are bit-identical.
+
+10. **Expand the additive mask to `[N, H, L, L]` yourself.** Done
+    pre-emptively because of gotcha 3; `(1 - mask) * -1e4` with an explicit
+    `.view(N,1,1,L).expand(N,H,L,L)` produced one `broadcast_to` per layer
+    and no "same type" errors. `-1e4` (not `-inf`) keeps every intermediate
+    finite; padded rows with an all-zero mask softmax to uniform instead of
+    NaN, which is what lets the static asset pad the batch dimension with
+    dummy rows.
+
+11. **`torch.export` refuses a size-1 example on a `Dim`.** Tracing with a
+    batch of 1 specialises the dim to a constant and then raises
+    "Constraints violated (batch) ... specialized it to be a constant (1)".
+    Export with an example batch of 2 (and any L ≥ 2).
+
+12. **`set_static_shape_config` takes several entrypoints at once.**
+    `shapes_config` is `{config name: {input: shape}}`; every input mentioned
+    gets one `coreai.enumerated_shapes` attribute listing all of its
+    specialisations and `optimize()` emits one fully typed function per
+    config. Eight configs (N ∈ {1,4,8,16} × L ∈ {64,128}) converted in 12 s
+    and the asset is the same 313 MB as the dynamic one — weights are shared,
+    only the graphs are duplicated. Gotcha 8 applies to every config: the
+    function is `main_<config>`, so a config called `main_n1_l64` becomes
+    `main_main_n1_l64`.
+
+13. **The local (macOS 26) runtime's matmul is ~25 GFLOP/s.** One inference
+    at N=1, L=64 is ~330 ms, of which 50 `broadcasting_batch_matmul` calls
+    are ~240 ms (4.8 ms each for a `[64,768]·[768,768]` product) and six
+    `gelu` calls ~17 ms; the same forward is 29 ms in PyTorch on the CPU.
+    `nn.Linear` on `[N,L,D]`, a flattened `[N·L,D]` linear and an explicit
+    `torch.mm` all lower to the same `broadcasting_batch_matmul` kernel and
+    time the same, and `COREAI_FAST_KERNELS=1` changes nothing. The binary
+    contains BNNS and Metal-stream symbols, but `SpecializationOptions`
+    is unsupported on this runtime (see above), so there is no way to reach
+    them from Python. This is the interim CPU runtime, not the model: at
+    5.4 GFLOP per row the OS runtime on macOS 27 should be tens of ms.
+    Measured on macOS 27.0 (2026-09-22): `CoreAI.framework` from Swift runs
+    1 × 64 in 5.3 ms and 16 × 64 in 47 ms (41–91× this runtime), same
+    asset, logits within 3e-6 — see docs/bench/README.md. Two things
+    change on macOS 27: `coreai-core` in Python switches to the OS framework
+    (`_coreai_runtime_os`) on its own, and the first load ever of an asset
+    specializes it — 2.2 s dynamic, 94–102 s for the eight-function static
+    asset, paid once by Python and once by Swift — then 10–12 ms.
+    Consequence for the bench: cost scales with N·L, so pad to the
+    smallest enumerated L that fits (64 covers every triage message in the
+    holdout) rather than always using the ceiling.
+
+14. **Static shapes save 3–20 % here, not the 18 % flat the snake decode saw.**
+    "Function Type Inference" is ~14 ms per dynamic call. Static vs dynamic
+    p50 over 20 calls: N=1 L=64 268 vs 276 ms; N=4 L=64 1040 vs 1311 ms;
+    N=1 L=128 538 vs 533 ms; N=8 L=128 4371 vs 4377 ms. Once the matmuls
+    are seconds, the fixed per-call overhead disappears in the noise.
+    Full matrix in `docs/bench/decide-python.json`. The flip side: a request
+    that does not match an enumerated shape is padded up to the next one,
+    and cost is linear in N·L — the 5-question triage call runs as N=8/L=64
+    on the static asset (2.1 s) but N=5/L=48 on the dynamic one (0.53 s).
+    Enumerate the shapes you actually serve.
+
+15. **First load writes a full copy of the weights to the specialization
+    cache.** `~/Library/Caches/coreai-cache/<python>/<hash>/` gained 316 MB
+    per asset (first load ~5–8 s, later loads ~250 ms). With two assets and
+    the 328 MB checkpoint that is ~1.3 GB on disk for one 82M-parameter
+    model; delete stale hashes when re-converting.
+
+### Future work: ModernBERT (Laya) is a converter project of its own
+
+`convaiinnovations/laya` (ModernBERT-large + decision head, 421M) runs in
+`decide_ai` as a plain-PyTorch backend only; there is no `.aimodel` for it.
+Two reasons, recorded so nobody restarts this by accident:
+
+- **Disk.** The weights are fp16 on disk (843 MB); an fp32 `.aimodel` would
+  be ~1.7 GB plus a ~1.6 GB runtime cache entry (gotcha 15 above scales with
+  the checkpoint), and this machine has ~2 GB free.
+- **Ops.** ModernBERT is not the plain encoder of gotcha 9: rotary position
+  embeddings (a `cos`/`sin` gather + rotate-half per layer), sliding-window
+  local attention on two of every three layers (a banded mask the converter
+  would have to see as a static `[L, L]` tensor, or a windowed kernel),
+  `global_attn_every_n_layers: 3` (two attention flavours in one graph), and
+  `transformers`' unpadding path (`index_put` / gather to pack the batch —
+  the exact op class that broke the snake KV cache, gotcha 2). Each of those
+  is a rewrite before `torch.export` sees a clean graph, and the decision
+  head adds a 2-layer `nn.TransformerEncoder` with a key-padding mask on top.
+
+The honest comparison today is PyTorch on the CPU (what a user without a
+GPU gets): ~0.3 s for a 5-question request on a quiet M2, ~35–60 s to load. See
+`docs/bench/decide-laya.json`.
+
 ## Profiling and debugging from Python
 
 | Xcode 27 tool | Python equivalent | Where |

@@ -1,0 +1,131 @@
+{
+  "schema": "decide-bench/1",
+  "runtime": "convaiinnovations/laya (PyTorch, CPU) via decide_ai.serve --backend laya (HTTP from Python)",
+  "recorded_at": "2026-09-21T03:32:06+00:00",
+  "host": {
+    "machine": "arm64",
+    "chip": "Apple M2",
+    "macos": "26.3",
+    "python": "3.12.1",
+    "coreai_core": "1.0.0b2"
+  },
+  "model_cache_warm": true,
+  "loadavg_1m": {
+    "before": 5.38037109375,
+    "after": 3.5302734375
+  },
+  "config": {
+    "backend": "remote",
+    "batches": [
+      1,
+      4,
+      8,
+      16
+    ],
+    "lengths": [
+      64,
+      128
+    ],
+    "warmup": 5,
+    "calls": 200,
+    "min_calls": 30,
+    "budget_s": 60.0,
+    "inputs": "data/decide/holdout.jsonl states x data/decide/bench_questions.json",
+    "note": "count per row is capped by budget_s; the local runtime takes seconds per call at large N x L",
+    "url": "http://127.0.0.1:8771"
+  },
+  "rows": [
+    {
+      "asset": "laya",
+      "N": 1,
+      "L": null,
+      "first_call_ms": 215.75662499526516,
+      "http_overhead_p50_ms": 0.7784789922880009,
+      "roundtrip_ms": {
+        "count": 200,
+        "mean": 134.2186053955811,
+        "p50": 130.31039548513945,
+        "p95": 141.22642500442447,
+        "min": 126.82533398037776,
+        "max": 380.2869159844704
+      },
+      "server_total_ms": {
+        "count": 200,
+        "mean": 133.4495658041851,
+        "p50": 129.53191649285145,
+        "p95": 140.4084038571454,
+        "min": 126.04212498990819,
+        "max": 379.45354101248085
+      }
+    },
+    {
+      "asset": "laya",
+      "N": 4,
+      "L": null,
+      "first_call_ms": 287.3691249988042,
+      "http_overhead_p50_ms": 0.7910210115369409,
+      "roundtrip_ms": {
+        "count": 200,
+        "mean": 262.41148540502763,
+        "p50": 254.89091650524642,
+        "p95": 285.12530000007246,
+        "min": 218.08608301216736,
+        "max": 678.9354580105282
+      },
+      "server_total_ms": {
+        "count": 200,
+        "mean": 261.5975000090839,
+        "p50": 254.09989549370948,
+        "p95": 284.324414555158,
+        "min": 217.2974580025766,
+        "max": 677.9141669976525
+      }
+    },
+    {
+      "asset": "laya",
+      "N": 8,
+      "L": null,
+      "first_call_ms": 489.80245800339617,
+      "http_overhead_p50_ms": 0.916457996936515,
+      "roundtrip_ms": {
+        "count": 131,
+        "mean": 460.19916442015835,
+        "p50": 448.33866599947214,
+        "p95": 503.0444375006482,
+        "min": 384.6826250082813,
+        "max": 908.0592079844791
+      },
+      "server_total_ms": {
+        "count": 131,
+        "mean": 459.3433695716449,
+        "p50": 447.4222080025356,
+        "p95": 502.2358755086316,
+        "min": 383.9322909770999,
+        "max": 906.7975000070874
+      }
+    },
+    {
+      "asset": "laya",
+      "N": 16,
+      "L": null,
+      "first_call_ms": 931.7520830081776,
+      "http_overhead_p50_ms": 0.908208530745469,
+      "roundtrip_ms": {
+        "count": 66,
+        "mean": 912.2881742144025,
+        "p50": 901.6711875156034,
+        "p95": 984.9807085120119,
+        "min": 795.1010419928934,
+        "max": 1382.895082992036
+      },
+      "server_total_ms": {
+        "count": 66,
+        "mean": 911.3404526380526,
+        "p50": 900.7629789848579,
+        "p95": 984.0142602479318,
+        "min": 794.2372499965131,
+        "max": 1381.3124170119409
+      }
+    }
+  ]
+}

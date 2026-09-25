@@ -130,11 +130,11 @@ public struct BenchRecord: Encodable, Sendable {
 
     /// Which Core AI path a player actually took, for the `runtime` field.
     public static func runtimeDescription(for player: any SnakePlayer) -> String {
-        switch player {
-        case is RemoteModelPlayer: "coreai.runtime via snake_ai.serve (HTTP from Swift)"
-        case is ModelPlayer: "CoreAI.framework (Swift, in-process)"
-        default: "no model (\(type(of: player)))"
+        if player is RemoteModelPlayer { return "coreai.runtime via snake_ai.serve (HTTP from Swift)" }
+        if #available(macOS 27, iOS 27, *), player is ModelPlayer || player is StatelessModelPlayer {
+            return "CoreAI.framework (Swift, in-process)"
         }
+        return "no model (\(type(of: player)))"
     }
 
     public func write(to url: URL) throws {

@@ -1,7 +1,7 @@
 [project]
 name = "apple-ai-inference"
 version = "0.1.0"
-description = "Core AI experiments: the WWDC26 snake demo and a SmolLM2 token-streaming port"
+description = "Core AI experiments: the WWDC26 snake demo, a zero-shot NLI decision model and a SmolLM2 token-streaming port"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "torch>=2.8,<2.13",
@@ -11,6 +11,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Hugging Face stack for decide_ai. transformers is only used to load the
+# reference model in tests/verify; serve.py never imports it.
+decide = ["huggingface_hub>=0.30", "safetensors>=0.4", "tokenizers>=0.20", "transformers>=4.40"]
 # Hugging Face stack for llm_ai only; snake_ai does not need it.
 llm = ["huggingface_hub>=0.30", "safetensors>=0.4", "tokenizers>=0.20"]
 
@@ -19,6 +22,13 @@ snake-train = "snake_ai.train:main"
 snake-convert = "snake_ai.convert:main"
 snake-verify = "snake_ai.verify:main"
 snake-play = "snake_ai.play:main"
+decide-download = "decide_ai.download:main"
+decide-convert = "decide_ai.convert:main"
+decide-verify = "decide_ai.verify:main"
+decide-calibrate = "decide_ai.calibrate:main"
+decide-serve = "decide_ai.serve:main"
+decide-bench = "decide_ai.bench:main"
+decide-laya = "decide_ai.laya:main"
 llm-download = "llm_ai.download:main"
 
 [build-system]
@@ -26,7 +36,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["snake_ai*", "llm_ai*"]
+include = ["snake_ai*", "decide_ai*", "llm_ai*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: loads a large checkpoint (Laya, ~1 min); deselect with -m 'not slow'"]

@@ -1,0 +1,85 @@
+{
+  "schema": "decide-bench/1",
+  "runtime": "typesafe-ai/jev via Vercel AI Gateway",
+  "recorded_at": "2026-09-20T04:06:58+00:00",
+  "host": {
+    "machine": "arm64",
+    "chip": "Apple M2",
+    "macos": "26.3",
+    "python": "3.12.1",
+    "coreai_core": "1.0.0b2"
+  },
+  "model_cache_warm": true,
+  "config": {
+    "backend": "jev",
+    "batches": [
+      1,
+      4,
+      8
+    ],
+    "lengths": null,
+    "warmup": 5,
+    "calls": 30,
+    "min_calls": 30,
+    "budget_s": null,
+    "inputs": "data/decide/holdout.jsonl states x data/decide/bench_questions.json",
+    "note": "Jev: N is questions per request; 30 timed calls after 5 warm-ups per N because the gateway allows 30 req/min and calls are paced at 25/min (~4 min for the matrix); --no-cache means every call was live",
+    "no_cache": true
+  },
+  "rows": [
+    {
+      "model": "typesafe-ai/jev",
+      "N": 1,
+      "first_call_ms": 909.8808330018073,
+      "usage_mean": {
+        "inputTokens": 283.5833333333333,
+        "outputTokens": 23.0
+      },
+      "transient_errors_retried": 0,
+      "roundtrip_ms": {
+        "count": 30,
+        "mean": 299.2498291670927,
+        "p50": 278.26433399604866,
+        "p95": 381.1640420048206,
+        "min": 190.54116700135637,
+        "max": 681.7354580125539
+      }
+    },
+    {
+      "model": "typesafe-ai/jev",
+      "N": 4,
+      "first_call_ms": 2276.7251659970498,
+      "usage_mean": {
+        "inputTokens": 327.5833333333333,
+        "outputTokens": 77.0
+      },
+      "transient_errors_retried": 1,
+      "roundtrip_ms": {
+        "count": 30,
+        "mean": 319.1636069997912,
+        "p50": 279.79674949892797,
+        "p95": 556.1304251517867,
+        "min": 220.1236249966314,
+        "max": 609.2251249938272
+      }
+    },
+    {
+      "model": "typesafe-ai/jev",
+      "N": 8,
+      "first_call_ms": 2340.4600829962874,
+      "usage_mean": {
+        "inputTokens": 381.5833333333333,
+        "outputTokens": 150.0
+      },
+      "transient_errors_retried": 0,
+      "roundtrip_ms": {
+        "count": 30,
+        "mean": 294.2629096335925,
+        "p50": 255.0301665032748,
+        "p95": 482.23727880031214,
+        "min": 194.66904101136606,
+        "max": 651.9473340013064
+      }
+    }
+  ]
+}

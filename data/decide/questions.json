@@ -1,0 +1,22 @@
+{
+  "is_complaint": {
+    "instructions": "Is the customer complaining?",
+    "hypothesis": "The customer is complaining."
+  },
+  "wants_refund": {
+    "instructions": "Is the customer asking for a refund?",
+    "hypothesis": "The customer is asking for a refund."
+  },
+  "about_shipping": {
+    "instructions": "Is this message about shipping or delivery?",
+    "hypothesis": "This message is about shipping or delivery."
+  },
+  "about_product_quality": {
+    "instructions": "Is this message about product quality?",
+    "hypothesis": "This message is about product quality."
+  },
+  "urgent": {
+    "instructions": "Is this urgent?",
+    "hypothesis": "This is urgent."
+  }
+}
