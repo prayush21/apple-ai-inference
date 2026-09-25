@@ -11,7 +11,19 @@ Read these before writing anything: `README.md`, `docs/coreai-ecosystem.md` (eve
 
 **Environment:** macOS 27.0, Xcode 27.0, Swift 6.4, `CoreAI.framework` available in-process. Python `coreai-core 1.0.0b2` in `.venv` (3.12) loads the **OS** runtime; `USE_LOCAL_COREAI=1` gives the old macOS 26 CPU runtime for a baseline row. M2 Mac.
 
-**Disk is the constraint.** About 7.6 GB free on 2026-09-25. Budget: HF weights ~725 MB, one `.aimodel` ~0.7 GB (fp16) or ~1.4 GB (fp32), a specialization copy of the same size in `coreai-cache` on first load, ~1 GB of export temporaries. Rules: download only the safetensors shard + tokenizer/config files; keep **one** `.aimodel` on disk at a time (delete the stateless one once its numbers are recorded); run `df -h /System/Volumes/Data` before each conversion and stop and report if it's under 3 GB. `~/Library/Caches/coreai-cache` (4.4 GB) may be cleared if needed; say so when you do.
+**Disk is the constraint.** 8.4 GB free on 2026-09-25, after the decide entries were deleted from `~/Library/Caches/coreai-cache` (it is ~50 MB now, snake only).
+
+How the specialization cache works (seen on disk 2026-09-25): the first load of an asset writes a full specialized copy, **one per loading program**. Python goes under `coreai-cache/<python version>/<program hash>/`. Swift goes under `coreai-cache/<OS build>/<executable name>/` (`llm-cli`, `LLMApp`, and `swiftpm-testing-helper` for `swift test`). The decide asset had a 1.7 GB copy for Python *and* another for `decide-cli`. Entries are never cleaned up when an asset is replaced.
+
+Budget per fp16 asset: HF weights ~725 MB (once), the `.aimodel` ~0.7 GB (~1.4 GB fp32), about the same again **for each program that loads it** (Python, `llm-cli`, `LLMApp`, tests), plus ~1 GB of export temporaries. One fp16 asset loaded from three programs is ~4 GB all in.
+
+Rules:
+- Download only the safetensors shard + tokenizer/config files.
+- Keep **one** `.aimodel` on disk at a time. Delete the stateless one once its numbers are recorded.
+- **When an asset is deleted or re-converted, delete its cache entries too.** For Swift that's `coreai-cache/<OS build>/{llm-cli,LLMApp,swiftpm-testing-helper}`. For Python it's the hash directories whose mtime matches the first load; list `coreai-cache/<python version>/` before and after that load to learn the hash.
+- A **cold** load time only counts if that program's cache entry was deleted first. Re-converting changes the asset, so the next load is cold anyway. Record in the bench JSON which it was.
+- Prefer `llm-cli` for Swift numbers. Launch `LLMApp` once for the screenshot, then delete its cache entry. Don't run `swift test` against the 360M asset unless a test needs it.
+- Run `df -h /System/Volumes/Data` before each conversion and before each first load from a new program. Stop and report if it's under 3 GB. Deleting LLM cache entries is fine without asking. Anything else in `coreai-cache` (snake) needs a question first.
 
 ## Branch
 
@@ -63,7 +75,7 @@ Don't try to beat numbers you've read elsewhere. Record what's measured, and not
 - Small commits per milestone, `Co-Authored-By` trailer as usual. Never commit weights, `.aimodel` files or caches (check `.gitignore` covers `models/llm/`).
 - `pytest -m "not slow"` stays fast. Anything that loads the 360M model gets `@pytest.mark.slow`.
 - If a converter/runtime op fails, reduce it to a ≤ 20-line repro in `scripts/`, record it as a numbered gotcha, and pick the smallest workaround. Don't restructure the model around a guess.
-- Stop and ask before: deleting anything outside `models/llm/`, clearing `coreai-cache`, pushing, or changing `max_seq_len`.
+- Stop and ask before: deleting anything outside `models/llm/` and the LLM entries in `coreai-cache`, pushing, or changing `max_seq_len`.
 
 ## Done means
 
