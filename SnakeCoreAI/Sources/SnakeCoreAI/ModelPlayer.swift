@@ -51,8 +51,9 @@ public struct StatelessModelPlayer: SnakePlayer {
 public struct ModelPlayer: SnakePlayer {
     let nextActionFunction: InferenceFunction
 
-    var keyCache: NDArray
-    var valueCache: NDArray
+    // Optional so a move can take them out (see `chooseAction`); nil only during a call.
+    var keyCache: NDArray?
+    var valueCache: NDArray?
     private let maxContext: Int
     private var position = 0
 
@@ -72,9 +73,10 @@ public struct ModelPlayer: SnakePlayer {
             }
             return NDArray(descriptor: d)
         }
-        self.keyCache = try stateArray("keyCache")
+        let keys = try stateArray("keyCache")
+        self.keyCache = keys
         self.valueCache = try stateArray("valueCache")
-        self.maxContext = keyCache.shape[2]
+        self.maxContext = keys.shape[2]
     }
 
     public mutating func chooseAction(game: SnakeGame, snakeID: Int) async throws -> Direction {
@@ -89,7 +91,16 @@ public struct ModelPlayer: SnakePlayer {
         // Views of the caches are handed to the runtime as mutable state. The
         // views borrow both caches at once, which exclusivity forbids on two
         // stored properties of `self`, so they move into locals for the call.
-        var keys = keyCache, values = valueCache
+        // Moved, not copied: `var keys = keyCache` would leave two references
+        // to the storage and taking the mutable view would copy both caches
+        // every move (gotcha 19).
+        guard var keys = keyCache.take(), var values = valueCache.take() else {
+            throw ModelError.missingState("keyCache/valueCache")
+        }
+        defer {
+            keyCache = keys
+            valueCache = values
+        }
         var stateViews = InferenceFunction.MutableViews()
         stateViews.insert(&keys, for: "keyCache")
         stateViews.insert(&values, for: "valueCache")
@@ -97,8 +108,6 @@ public struct ModelPlayer: SnakePlayer {
         var outputs = try await nextActionFunction.run(
             inputs: ["features": inputFeatures, "position_ids": positionIDs],
             states: stateViews)
-        keyCache = keys
-        valueCache = values
         guard let logits = outputs.remove("logits")?.ndArray else {
             throw ModelError.missingOutput("logits")
         }

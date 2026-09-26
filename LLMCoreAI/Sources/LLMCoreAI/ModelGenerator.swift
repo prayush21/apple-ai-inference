@@ -48,7 +48,13 @@ public final class ModelGenerator: TokenGenerator {
         self.label = "CoreAI.framework (in-process) — \(modelURL.lastPathComponent), prefill t\(prefill) + decode"
     }
 
-    public func reset() async throws { await engine.reset() }
+    /// Waits for a generation still running on the engine (e.g. one whose
+    /// stream was just cancelled) before clearing the caches.
+    public func reset() async throws {
+        await engine.acquire()
+        await engine.reset()
+        await engine.release()
+    }
 
     /// Tokens already in the cache.
     public var position: Int { get async { await engine.position } }
@@ -62,8 +68,8 @@ public final class ModelGenerator: TokenGenerator {
     /// `system`, or SmolLM2's default system message); later ones continue it.
     public func chat(_ message: String, system: String? = nil, maxTokens: Int) -> AsyncThrowingStream<GeneratedToken, Error> {
         let engine = self.engine, encoder = self.encoder, eosID = self.eosID
-        return stream(maxTokens: maxTokens, stopAtEOS: true) {
-            let (started, pending) = await engine.beginChatTurn()
+        return stream(maxTokens: maxTokens, stopAtEOS: true, opensChat: true) {
+            let (started, pending) = await engine.chatState()
             let text: String
             if started {
                 // The previous reply's last token is still pending (not in the
@@ -88,15 +94,28 @@ public final class ModelGenerator: TokenGenerator {
     /// so multi-byte characters are never split. The first token's `ms` is
     /// the prefill (time to first token). Cancelling stops between tokens
     /// and leaves the cache consistent (the last token stays pending).
-    private func stream(maxTokens: Int, stopAtEOS: Bool,
+    ///
+    /// Generations hold the engine for their whole run, so a cancelled one
+    /// (its consumer is gone, but a prefill or decode call is still in
+    /// flight) finishes before the next one reads `pending` and `position`.
+    private func stream(maxTokens: Int, stopAtEOS: Bool, opensChat: Bool = false,
                         prompt: @escaping @Sendable () async throws -> [Int]) -> AsyncThrowingStream<GeneratedToken, Error> {
         let engine = self.engine, decoder = self.decoder, eosID = self.eosID
         return AsyncThrowingStream { continuation in
             let task = Task {
+                await engine.acquire()
+                guard !Task.isCancelled else {
+                    await engine.release()
+                    continuation.finish()
+                    return
+                }
                 do {
                     var clock = ContinuousClock.now
-                    var next = try await engine.prefill(try await prompt())
-                    var reply: [Int] = [], emitted = ""
+                    var next = try await engine.prefill(try await prompt(), opensChat: opensChat)
+                    // Emitted text is tracked in UTF-8 bytes, not Characters: a
+                    // token that only adds a combining mark, ZWJ or emoji
+                    // modifier leaves the Character count unchanged.
+                    var reply: [Int] = [], emittedBytes = 0
                     for _ in 0..<maxTokens {
                         let ms = Self.ms(since: clock)
                         if stopAtEOS && next == eosID { break }
@@ -104,8 +123,8 @@ public final class ModelGenerator: TokenGenerator {
                         let text = decoder.decode(reply)
                         var piece = ""
                         if !text.hasSuffix("\u{FFFD}") {
-                            piece = String(text.dropFirst(emitted.count))
-                            emitted = text
+                            piece = String(decoding: text.utf8.dropFirst(emittedBytes), as: UTF8.self)
+                            emittedBytes = text.utf8.count
                         }
                         continuation.yield(GeneratedToken(id: next, text: piece, ms: ms))
                         if reply.count == maxTokens || Task.isCancelled { break }
@@ -116,6 +135,7 @@ public final class ModelGenerator: TokenGenerator {
                 } catch {
                     continuation.finish(throwing: error)
                 }
+                await engine.release()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
@@ -147,6 +167,10 @@ actor Engine {
     /// The next prefill or decode feeds it first.
     private(set) var pending: Int?
     private var chatStarted = false
+    /// One generation at a time (`acquire` / `release`): actor methods are
+    /// re-entrant at every `await`, so the actor alone does not serialize them.
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
     init(modelURL: URL, options: SpecializationOptions, padID: Int) async throws {
         let model = try await AIModel(contentsOf: modelURL, options: options)
@@ -197,33 +221,58 @@ actor Engine {
         chatStarted = false
     }
 
-    /// Marks the conversation as started; returns whether it already was,
-    /// and the pending token.
-    func beginChatTurn() -> (started: Bool, pending: Int?) {
-        defer { chatStarted = true }
-        return (chatStarted, pending)
+    func acquire() async {
+        if busy {
+            await withCheckedContinuation { waiters.append($0) }
+        } else {
+            busy = true
+        }
+    }
+
+    /// Hands the engine to the next waiter (still busy) or frees it.
+    func release() {
+        if waiters.isEmpty {
+            busy = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+
+    /// Whether the chat template has been opened, and the pending token.
+    func chatState() -> (started: Bool, pending: Int?) {
+        (chatStarted, pending)
     }
 
     /// Append the pending token (if any) and `ids` at the current position;
-    /// returns the greedy next token, which becomes pending.
-    func prefill(_ newIDs: [Int]) async throws -> Int {
+    /// returns the greedy next token, which becomes pending. `opensChat`
+    /// marks the chat as started, only once the prefill has succeeded. On
+    /// failure `position` and `pending` roll back: slots past `position` are
+    /// rewritten before anything attends to them, so the cache stays usable.
+    func prefill(_ newIDs: [Int], opensChat: Bool = false) async throws -> Int {
         let ids = (pending.map { [$0] } ?? []) + newIDs
         guard position + ids.count < maxContext else { throw GeneratorError.contextExhausted }
+        let startPosition = position
         var next = -1
-        for start in stride(from: 0, to: ids.count, by: prefillLength) {
-            let chunk = Array(ids[start..<min(start + prefillLength, ids.count)])
-            // Left-pad to the static length. Pad rows point at the last slot,
-            // which nothing real attends to before a decode step overwrites it
-            // (llm_ai.model.left_pad); so the prompt must leave that slot free.
-            guard position + chunk.count < maxContext else { throw GeneratorError.contextExhausted }
-            let pad = prefillLength - chunk.count
-            let tokens = [Int32](repeating: Int32(padID), count: pad) + chunk.map(Int32.init)
-            let positions = [Int32](repeating: Int32(maxContext - 1), count: pad)
-                + (position..<(position + chunk.count)).map(Int32.init)
-            next = try await run(prefillFunction, tokens: tokens, positions: positions)
-            position += chunk.count
+        do {
+            for start in stride(from: 0, to: ids.count, by: prefillLength) {
+                let chunk = Array(ids[start..<min(start + prefillLength, ids.count)])
+                // Left-pad to the static length. Pad rows point at the last slot,
+                // which nothing real attends to before a decode step overwrites it
+                // (llm_ai.model.left_pad); so the prompt must leave that slot free.
+                guard position + chunk.count < maxContext else { throw GeneratorError.contextExhausted }
+                let pad = prefillLength - chunk.count
+                let tokens = [Int32](repeating: Int32(padID), count: pad) + chunk.map(Int32.init)
+                let positions = [Int32](repeating: Int32(maxContext - 1), count: pad)
+                    + (position..<(position + chunk.count)).map(Int32.init)
+                next = try await run(prefillFunction, tokens: tokens, positions: positions)
+                position += chunk.count
+            }
+        } catch {
+            position = startPosition
+            throw error
         }
         pending = next
+        if opensChat { chatStarted = true }
         return next
     }
 
