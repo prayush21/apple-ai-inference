@@ -68,7 +68,12 @@ class StatefulLM:
 
     @classmethod
     async def load(cls, path: Path = DEFAULT_STATEFUL, compute: str = "gpu") -> "StatefulLM":
-        return cls(*await load_model(path, compute))
+        # load_ms covers load_function and the cache allocation too, like the
+        # Swift ModelGenerator: AIModel.load alone returns in ~15 ms.
+        t0 = time.perf_counter()
+        lm = cls(*await load_model(path, compute))
+        lm.load_ms = (time.perf_counter() - t0) * 1e3
+        return lm
 
     def reset(self) -> None:
         """Fresh zeroed caches. Zeroed matters: masked slots get softmax weight
@@ -120,7 +125,10 @@ class StatelessLM:
 
     @classmethod
     async def load(cls, path: Path = DEFAULT_STATELESS, compute: str = "gpu") -> "StatelessLM":
-        return cls(*await load_model(path, compute))
+        t0 = time.perf_counter()
+        lm = cls(*await load_model(path, compute))
+        lm.load_ms = (time.perf_counter() - t0) * 1e3
+        return lm
 
     async def logits(self, ids: list[int]) -> np.ndarray:
         out = await self.fn({"input_ids": _ids(np.array([ids]))})

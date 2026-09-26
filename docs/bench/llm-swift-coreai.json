@@ -1,0 +1,170 @@
+{
+ "records": [
+  {
+   "asset": "../models/llm/SmolLM2Stateful.aimodel",
+   "build": "release",
+   "compute": "gpu",
+   "decode_ms": {
+    "count": 635,
+    "mean": 22.316,
+    "min": 21.84,
+    "p50": 22.266,
+    "p95": 22.705
+   },
+   "deterministic": true,
+   "generated_tokens": 128,
+   "git": "a1eee5a-dirty",
+   "host": {
+    "chip": "Apple M2",
+    "machine": "arm64",
+    "macos": "Version 27.0 (Build 26A428)"
+   },
+   "load_avg": [
+    2.52,
+    3.12,
+    3.23
+   ],
+   "load_ms": {
+    "cache": "cold",
+    "value": 18598.397,
+    "cached_samples": [
+     2625,
+     4066,
+     5827,
+     9422,
+     11434,
+     4419,
+     2769
+    ],
+    "cached_note": "ModelGenerator init, fresh llm-cli processes 2026-09-25 23:10-23:20; highly variable"
+   },
+   "peak_rss_mb": 4539.826,
+   "precision": "fp16",
+   "prefill_ms": {
+    "count": 5,
+    "mean": 71.501,
+    "min": 58.769,
+    "p50": 69.435,
+    "p95": 87.025
+   },
+   "prompt_tokens": 16,
+   "recorded_at": "2026-09-26T03:21:40Z",
+   "reference_check": "32/32",
+   "runs": 5,
+   "runtime": "framework",
+   "tok_per_s": 44.811,
+   "variant": "stateful"
+  },
+  {
+   "asset": "../models/llm/SmolLM2Stateful.aimodel",
+   "build": "release",
+   "compute": "gpu",
+   "decode_ms": {
+    "count": 635,
+    "mean": 22.391,
+    "min": 21.897,
+    "p50": 22.345,
+    "p95": 22.874
+   },
+   "deterministic": true,
+   "generated_tokens": 128,
+   "git": "a1eee5a-dirty",
+   "host": {
+    "chip": "Apple M2",
+    "machine": "arm64",
+    "macos": "Version 27.0 (Build 26A428)"
+   },
+   "load_avg": [
+    2.52,
+    3.12,
+    3.23
+   ],
+   "load_ms": {
+    "cache": "cold",
+    "value": 18598.397,
+    "cached_samples": [
+     2625,
+     4066,
+     5827,
+     9422,
+     11434,
+     4419,
+     2769
+    ],
+    "cached_note": "ModelGenerator init, fresh llm-cli processes 2026-09-25 23:10-23:20; highly variable"
+   },
+   "peak_rss_mb": 4539.826,
+   "precision": "fp16",
+   "prefill_ms": {
+    "count": 5,
+    "mean": 111.969,
+    "min": 109.472,
+    "p50": 111.842,
+    "p95": 114.991
+   },
+   "prompt_tokens": 128,
+   "recorded_at": "2026-09-26T03:22:02Z",
+   "reference_check": "32/32",
+   "runs": 5,
+   "runtime": "framework",
+   "tok_per_s": 44.661,
+   "variant": "stateful"
+  },
+  {
+   "asset": "../models/llm/SmolLM2Stateful.aimodel",
+   "build": "release",
+   "compute": "gpu",
+   "decode_ms": {
+    "count": 635,
+    "mean": 22.355,
+    "min": 21.816,
+    "p50": 22.298,
+    "p95": 22.774
+   },
+   "deterministic": true,
+   "generated_tokens": 128,
+   "git": "a1eee5a-dirty",
+   "host": {
+    "chip": "Apple M2",
+    "machine": "arm64",
+    "macos": "Version 27.0 (Build 26A428)"
+   },
+   "load_avg": [
+    2.52,
+    3.12,
+    3.23
+   ],
+   "load_ms": {
+    "cache": "cold",
+    "value": 18598.397,
+    "cached_samples": [
+     2625,
+     4066,
+     5827,
+     9422,
+     11434,
+     4419,
+     2769
+    ],
+    "cached_note": "ModelGenerator init, fresh llm-cli processes 2026-09-25 23:10-23:20; highly variable"
+   },
+   "peak_rss_mb": 4539.826,
+   "precision": "fp16",
+   "prefill_ms": {
+    "count": 5,
+    "mean": 379.502,
+    "min": 376.358,
+    "p50": 378.032,
+    "p95": 384.165
+   },
+   "prompt_tokens": 512,
+   "recorded_at": "2026-09-26T03:22:25Z",
+   "reference_check": "32/32",
+   "runs": 5,
+   "runtime": "framework",
+   "tok_per_s": 44.733,
+   "variant": "stateful"
+  }
+ ],
+ "schema": "llm-bench/1"
+}

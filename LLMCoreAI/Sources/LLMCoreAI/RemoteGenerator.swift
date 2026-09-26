@@ -31,7 +31,7 @@ public struct RemoteGenerator: TokenGenerator {
         self.info = try decoder.decode(Info.self, from: data)
     }
 
-    public mutating func reset() async throws {}
+    public func reset() async throws {}
 
     public func generate(prompt: String, maxTokens: Int) -> AsyncThrowingStream<GeneratedToken, Error> {
         AsyncThrowingStream { $0.finish(throwing: GeneratorError.server("streaming not implemented yet")) }
