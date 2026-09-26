@@ -15,7 +15,8 @@ dev = ["pytest"]
 # reference model in tests/verify; serve.py never imports it.
 decide = ["huggingface_hub>=0.30", "safetensors>=0.4", "tokenizers>=0.20", "transformers>=4.40"]
 # Hugging Face stack for llm_ai only; snake_ai does not need it.
-llm = ["huggingface_hub>=0.30", "safetensors>=0.4", "tokenizers>=0.20"]
+# transformers only loads the reference model in tests / the model check.
+llm = ["huggingface_hub>=0.30", "safetensors>=0.4", "tokenizers>=0.20", "transformers>=4.40"]
 
 [project.scripts]
 snake-train = "snake_ai.train:main"
