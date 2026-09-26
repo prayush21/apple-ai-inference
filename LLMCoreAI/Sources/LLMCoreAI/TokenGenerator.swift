@@ -28,7 +28,6 @@ public enum GeneratorError: Error, CustomStringConvertible {
     case missingOutput(String)
     case missingState(String)
     case contextExhausted
-    case untokenizedPrompt(String)
     case server(String)
 
     public var description: String {
@@ -37,8 +36,6 @@ public enum GeneratorError: Error, CustomStringConvertible {
         case .missingOutput(let n): return "function returned no output named \(n)"
         case .missingState(let n): return "function has no state named \(n)"
         case .contextExhausted: return "KV cache is full; call reset()"
-        case .untokenizedPrompt(let p):
-            return "no Swift BPE encoder yet and \"\(p.prefix(40))\" is not in prompt_ids.json (python -m llm_ai.prompt_ids)"
         case .server(let m): return "server: \(m)"
         }
     }

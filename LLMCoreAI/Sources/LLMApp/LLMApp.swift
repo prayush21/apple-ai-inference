@@ -1,15 +1,17 @@
 import SwiftUI
 import LLMCoreAI
 
-// SmolLM2 chat box with a tokens/sec gauge — the LLM counterpart of
-// SnakeApp's inference-ms HUD. Runs the asset in-process on CoreAI.framework
-// (macOS 27). Prompts come pre-tokenized from data/llm/prompt_ids.json until
-// a Swift BPE encoder exists, so the prompt is a picker, not a text field.
+// SmolLM2 chat with a tokens/sec gauge — the LLM counterpart of SnakeApp's
+// inference-ms HUD. The model runs in-process on CoreAI.framework (macOS 27);
+// text is tokenized in Swift and the conversation lives in the KV cache, so
+// each message only prefills its own tokens. The cache holds 1024 tokens;
+// "New chat" clears it.
 //
 // Paths default to the repo layout relative to LLMCoreAI/ (the directory
-// `swift run LLMApp` is started from); override with LLM_MODEL, LLM_TOKENIZER
-// and LLM_PROMPTS. LLM_AUTOGENERATE=1 runs the first prompt after loading;
-// LLM_SNAPSHOT=<path.png> then renders the window's content to that file.
+// `swift run LLMApp` is started from); override with LLM_MODEL and
+// LLM_TOKENIZER. For unattended screenshots: LLM_AUTOGENERATE="<message>"
+// sends that message after loading, and LLM_SNAPSHOT=<path.png> then renders
+// the window's content to that file.
 
 @main
 struct LLMApp: App {
@@ -30,35 +32,46 @@ enum Paths {
     }
     static let model = url("LLM_MODEL", "../models/llm/SmolLM2Stateful.aimodel")
     static let tokenizer = url("LLM_TOKENIZER", "../models/llm/hf/SmolLM2-360M-Instruct/tokenizer.json")
-    static let prompts = url("LLM_PROMPTS", "../data/llm/prompt_ids.json")
+}
+
+struct Turn: Identifiable {
+    let id = UUID()
+    let isUser: Bool
+    var text: String
 }
 
 @available(macOS 27, *)
 @MainActor
 final class ChatModel: ObservableObject {
-    @Published var status = "Loading model…"
-    @Published var prompts: [PromptIDs.Chat] = []
-    @Published var selected = 0
-    @Published var reply = ""
+    @Published var status = "Loading model… (the first launch specializes it: ~20–30 s)"
+    @Published var turns: [Turn] = []
+    @Published var draft = ""
     @Published var running = false
     @Published var loadMS: Double?
     @Published var firstTokenMS: Double?
     @Published var tokensPerSecond: Double = 0
     @Published var tokenCount = 0
+    @Published var contextUsed = 0
+    @Published var maxContext = 1024
     private var generator: ModelGenerator?
+    private var task: Task<Void, Never>?
+
+    var ready: Bool { generator != nil }
 
     func load() async {
         do {
-            let ids = try PromptIDs.load(Paths.prompts)
-            prompts = ids.chat
-            let g = try await ModelGenerator(modelURL: Paths.model, tokenizerURL: Paths.tokenizer, prompts: ids)
+            let g = try await ModelGenerator(modelURL: Paths.model, tokenizerURL: Paths.tokenizer)
             generator = g
             loadMS = g.loadMS
-            status = "\(g.precision) · prefill t64 + decode · \(g.maxContext)-token cache"
-            // For unattended screenshots: generate once as soon as the model is loaded.
+            maxContext = g.maxContext
+            status = "\(g.precision) · prefill t64 + decode · GPU"
             let env = ProcessInfo.processInfo.environment
-            if env["LLM_AUTOGENERATE"] == "1" {
-                await generate()
+            if let message = env["LLM_AUTOGENERATE"] {
+                for m in message.components(separatedBy: " || ") {
+                    draft = m == "1" ? "Give me three tips for writing clear commit messages." : m
+                    send()
+                    await task?.value
+                }
                 if let path = env["LLM_SNAPSHOT"] { snapshot(to: URL(fileURLWithPath: path)) }
             }
         } catch {
@@ -66,39 +79,58 @@ final class ChatModel: ObservableObject {
         }
     }
 
-    func generate() async {
-        guard let generator, prompts.indices.contains(selected) else { return }
+    func send() {
+        let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let generator, !message.isEmpty, !running else { return }
+        draft = ""
+        turns.append(Turn(isUser: true, text: message))
+        turns.append(Turn(isUser: false, text: ""))
+        let index = turns.count - 1
         running = true
-        reply = ""
         firstTokenMS = nil
         tokenCount = 0
         tokensPerSecond = 0
-        defer { running = false }
-        do {
-            try await generator.reset()
+        task = Task {
             var decodeMS = 0.0
-            for try await t in generator.generate(prompt: prompts[selected].prompt, maxTokens: 256) {
-                reply += t.text
-                if tokenCount == 0 {
-                    firstTokenMS = t.ms
-                } else {
-                    decodeMS += t.ms
-                    tokensPerSecond = Double(tokenCount) / decodeMS * 1e3
+            do {
+                for try await t in generator.chat(message, maxTokens: 512) {
+                    turns[index].text += t.text
+                    if tokenCount == 0 {
+                        firstTokenMS = t.ms
+                    } else {
+                        decodeMS += t.ms
+                        tokensPerSecond = Double(tokenCount) / decodeMS * 1e3
+                    }
+                    tokenCount += 1
                 }
-                tokenCount += 1
+            } catch GeneratorError.contextExhausted {
+                turns[index].text += "\n[context full (\(maxContext) tokens) — start a new chat]"
+            } catch {
+                turns[index].text += "\n[\(error)]"
             }
-        } catch {
-            reply += "\n[\(error)]"
+            contextUsed = await generator.position
+            running = false
         }
     }
-}
 
-@available(macOS 27, *)
-extension ChatModel {
+    func stop() { task?.cancel() }
+
+    func newChat() {
+        guard let generator, !running else { return }
+        Task {
+            try? await generator.reset()
+            turns = []
+            contextUsed = 0
+            firstTokenMS = nil
+            tokenCount = 0
+            tokensPerSecond = 0
+        }
+    }
+
     /// Render the chat content (same view as the window) to a PNG.
     func snapshot(to url: URL) {
         let renderer = ImageRenderer(content: ChatContent(model: self, snapshot: true)
-            .frame(width: 720, height: 560)
+            .frame(width: 720, height: 620)
             .background(Color(nsColor: .windowBackgroundColor)))
         renderer.scale = 2
         guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
@@ -113,7 +145,7 @@ struct ChatView: View {
 
     var body: some View {
         ChatContent(model: model)
-            .frame(minWidth: 640, minHeight: 480)
+            .frame(minWidth: 640, minHeight: 520)
             .task { await model.load() }
     }
 }
@@ -121,8 +153,8 @@ struct ChatView: View {
 @available(macOS 27, *)
 struct ChatContent: View {
     @ObservedObject var model: ChatModel
-    /// ImageRenderer cannot draw AppKit-backed controls (Picker, Button,
-    /// ScrollView), so the snapshot swaps them for plain text.
+    /// ImageRenderer cannot draw AppKit-backed controls (TextField, Button,
+    /// ScrollView), so the snapshot swaps them for plain views.
     var snapshot = false
 
     var body: some View {
@@ -135,33 +167,33 @@ struct ChatContent: View {
             Text(model.status).font(.caption).foregroundStyle(.secondary)
 
             if snapshot {
-                Text("> " + (model.prompts.indices.contains(model.selected) ? model.prompts[model.selected].prompt : ""))
-                    .font(.headline)
-                Text(model.reply)
-                    .font(.body.monospaced())
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(8)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                transcript.frame(maxHeight: .infinity, alignment: .top)
             } else {
-            HStack {
-                Picker("Prompt", selection: $model.selected) {
-                    ForEach(model.prompts.indices, id: \.self) { i in Text(model.prompts[i].prompt).tag(i) }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        transcript
+                        Color.clear.frame(height: 1).id("bottom")
+                    }
+                    .onChange(of: model.turns.last?.text) { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
-                Button(model.running ? "Generating…" : "Generate") { Task { await model.generate() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.running || model.loadMS == nil)
-            }
+                .frame(maxHeight: .infinity)
 
-            ScrollView {
-                Text(model.reply.isEmpty ? " " : model.reply)
-                    .font(.body.monospaced())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-            .defaultScrollAnchor(.top)
-            .frame(minHeight: 220)
-            .padding(8)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                HStack {
+                    TextField(model.ready ? "Message SmolLM2" : "Loading…", text: $model.draft, axis: .vertical)
+                        .lineLimit(1...5)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { model.send() }
+                        .disabled(!model.ready)
+                    if model.running {
+                        Button("Stop") { model.stop() }
+                    } else {
+                        Button("Send") { model.send() }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(!model.ready || model.draft.isEmpty)
+                    }
+                    Button("New chat") { model.newChat() }
+                        .disabled(model.running || model.turns.isEmpty)
+                }
             }
 
             HStack(spacing: 24) {
@@ -174,11 +206,33 @@ struct ChatContent: View {
                 .tint(.green)
                 stat("tokens", "\(model.tokenCount)")
                 stat("first token", model.firstTokenMS.map { String(format: "%.0f ms", $0) } ?? "—")
+                stat("context", "\(model.contextUsed) / \(model.maxContext)")
                 stat("load", model.loadMS.map { String(format: "%.1f s", $0 / 1e3) } ?? "—")
                 Spacer()
             }
         }
         .padding(20)
+    }
+
+    private var transcript: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.turns.isEmpty {
+                Text(model.ready ? "Ask anything. Replies are greedy (deterministic)." : " ")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(model.turns) { turn in
+                HStack {
+                    if turn.isUser { Spacer(minLength: 60) }
+                    Text(turn.text.isEmpty ? "…" : turn.text)
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .background(turn.isUser ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 10))
+                    if !turn.isUser { Spacer(minLength: 60) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func stat(_ label: String, _ value: String) -> some View {

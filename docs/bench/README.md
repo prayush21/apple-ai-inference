@@ -162,5 +162,5 @@ runtime, compute, precision, prompt length).
 
 The stateless asset is not in this table: every new sequence length
 recompiles on the OS runtime (9–25 s each), see `docs/coreai-ecosystem.md`
-gotcha 20. `docs/bench/img/llmapp.png` is `LLMApp` after one reply.
+gotcha 20. `docs/bench/img/llmapp-chat.png` is `LLMApp` after a two-turn chat.
 

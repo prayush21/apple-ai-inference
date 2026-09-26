@@ -253,7 +253,7 @@ each in fp16.
 | `llm_ai/play.py` | Streamed chat in the terminal; `--bench` writes `llm-bench/1` records |
 | `llm_ai/prompt_ids.py` | Pre-tokenized prompts + PyTorch greedy reference for Swift → `data/llm/prompt_ids.json` |
 | `scripts/llm_*.py` | Shared-state proof on a 2-layer model, the Neural Engine repro (gotcha 17), the stateless probe (gotcha 20) |
-| `LLMCoreAI/` | `ModelGenerator` (`CoreAI.framework`, in-process), `ByteLevelDecoder` (ids → text from `tokenizer.json`), `llm-cli` (self-check, chat, bench), `LLMApp` (SwiftUI, tok/s gauge) |
+| `LLMCoreAI/` | `ModelGenerator` (`CoreAI.framework`, in-process, multi-turn `chat`), `BPEEncoder` / `ByteLevelDecoder` (text ↔ ids from `tokenizer.json`), `ChatTemplate`, `llm-cli` (self-check, chat, bench), `LLMApp` (SwiftUI chat, tok/s gauge) |
 
 ### Quick start
 
@@ -321,7 +321,13 @@ generated tokens × 5 runs per prompt length, EOS ignored. Records in
 - **The macOS 26 runtime is ~90× slower** per token (2.07 s): the interim
   CPU runtime of gotcha 13.
 
-![LLMApp](docs/bench/img/llmapp.png)
+![LLMApp](docs/bench/img/llmapp-chat.png)
+
+Chat with it:
+
+```bash
+cd LLMCoreAI && swift build -c release --product LLMApp && .build/release/LLMApp
+```
 
 ### Status
 
@@ -330,7 +336,7 @@ generated tokens × 5 runs per prompt length, EOS ignored. Records in
 - [x] 3. `convert` — one fp16 asset, `main_prefill_t64` + `main_decode` sharing states (proved on a 2-layer model first); t16/t128/t512 dropped for disk (gotcha 18)
 - [x] 4. `verify` — 32/32 top-1, reset, in-place states, chunked prefill
 - [x] 5. `play` — streamed chat + `docs/bench/llm-python.json`
-- [x] 6. Swift `ModelGenerator` on `CoreAI.framework`, `llm-cli --json` → `docs/bench/llm-swift-coreai.json`, `LLMApp` screenshot. Prompts are pre-tokenized in Python; Swift decodes ids. A Swift BPE **encoder** is still the stretch goal.
+- [x] 6. Swift `ModelGenerator` on `CoreAI.framework`, `llm-cli --json` → `docs/bench/llm-swift-coreai.json`, `LLMApp` screenshot. Stretch goal done too: `BPEEncoder` tokenizes in Swift (identical to Hugging Face `tokenizers` on 355 test strings, `swift test`), so `LLMApp` is a free-text, multi-turn chat whose conversation lives in the KV cache; the second turn of the screenshot below matches PyTorch recomputing the whole conversation word for word.
 - [ ] 7. `serve` — **deferred.** The per-token HTTP hop was already measured on snake (6.8 ms round trip vs 4.3 ms server-side); here it would need a third 1.4 GB specialization copy on a disk that has ~8 GB free. `RemoteGenerator` still only probes `/info`.
 - [x] 8. This section and gotchas 16–21 in `docs/coreai-ecosystem.md`
 

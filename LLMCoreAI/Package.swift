@@ -21,5 +21,8 @@ let package = Package(
         // SwiftUI chat box with a tokens/sec gauge — the LLM counterpart of
         // SnakeApp's inference-ms HUD.
         .executableTarget(name: "LLMApp", dependencies: ["LLMCoreAI"]),
+
+        // Tokenizer tests only (no model load, so no specialization cache).
+        .testTarget(name: "LLMCoreAITests", dependencies: ["LLMCoreAI"], resources: [.copy("Fixtures")]),
     ]
 )

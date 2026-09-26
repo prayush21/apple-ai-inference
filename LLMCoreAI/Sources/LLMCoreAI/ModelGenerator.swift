@@ -10,13 +10,16 @@ import CoreAI
 /// as *states*, exactly like `SnakeCoreAI.ModelPlayer`; greedy sampling is
 /// an argmax over the vocabulary logits of the newest token.
 ///
-/// Prompts are token ids. `generate(prompt:)` looks the text up in
-/// `prompt_ids.json` until a Swift BPE encoder exists.
+/// `chat(_:)` / `generate(prompt:)` keep a multi-turn conversation in the
+/// cache: text is encoded in Swift (`BPEEncoder`) with SmolLM2's chat
+/// template, and each turn only prefills its own tokens. `generate(promptIDs:)`
+/// appends raw ids (the bench). `reset()` starts over.
 @available(macOS 27, iOS 27, *)
 public final class ModelGenerator: TokenGenerator {
     public let label: String
     public let loadMS: Double
     public let decoder: ByteLevelDecoder
+    public let encoder: BPEEncoder
     public let eosID: Int
     public let maxContext: Int
     /// "fp16" or "fp32", from the KV-cache state's scalar type.
@@ -36,6 +39,7 @@ public final class ModelGenerator: TokenGenerator {
         let elapsed = ContinuousClock.now - start
         self.loadMS = Double(elapsed.components.seconds) * 1e3 + Double(elapsed.components.attoseconds) / 1e15
         self.decoder = try ByteLevelDecoder(tokenizerJSON: tokenizerURL)
+        self.encoder = try BPEEncoder(tokenizerJSON: tokenizerURL)
         self.prompts = prompts
         self.eosID = prompts?.eosId ?? eosID
         self.maxContext = engine.maxContext
@@ -50,23 +54,48 @@ public final class ModelGenerator: TokenGenerator {
     public var position: Int { get async { await engine.position } }
 
     public func generate(prompt: String, maxTokens: Int) -> AsyncThrowingStream<GeneratedToken, Error> {
-        guard let ids = prompts?.ids(for: prompt) else {
-            return AsyncThrowingStream { $0.finish(throwing: GeneratorError.untokenizedPrompt(prompt)) }
+        chat(prompt, maxTokens: maxTokens)
+    }
+
+    /// Send one user message in the ongoing conversation and stream the
+    /// assistant's reply. The first message opens the chat template (with
+    /// `system`, or SmolLM2's default system message); later ones continue it.
+    public func chat(_ message: String, system: String? = nil, maxTokens: Int) -> AsyncThrowingStream<GeneratedToken, Error> {
+        let engine = self.engine, encoder = self.encoder, eosID = self.eosID
+        return stream(maxTokens: maxTokens, stopAtEOS: true) {
+            let (started, pending) = await engine.beginChatTurn()
+            let text: String
+            if started {
+                // The previous reply's last token is still pending (not in the
+                // cache). If it was <|im_end|> it is fed as-is; if the reply was
+                // cut off, close the turn here.
+                text = (pending == eosID ? "" : ChatTemplate.end) + "\n" + ChatTemplate.turn(user: message)
+            } else {
+                text = ChatTemplate.opening(system: system, user: message)
+            }
+            return encoder.encode(text)
         }
-        return generate(promptIDs: ids, maxTokens: maxTokens)
     }
 
     /// Append `promptIDs` to the conversation and stream up to `maxTokens`
     /// greedy tokens. `stopAtEOS: false` always produces `maxTokens` (bench).
-    /// Each token's `text` is the reply decoded so far, minus what earlier
-    /// tokens already produced, so multi-byte characters are never split.
     public func generate(promptIDs: [Int], maxTokens: Int, stopAtEOS: Bool = true) -> AsyncThrowingStream<GeneratedToken, Error> {
+        stream(maxTokens: maxTokens, stopAtEOS: stopAtEOS) { promptIDs }
+    }
+
+    /// Prefill the ids `prompt` returns, then decode. Each token's `text` is
+    /// the reply decoded so far minus what earlier tokens already produced,
+    /// so multi-byte characters are never split. The first token's `ms` is
+    /// the prefill (time to first token). Cancelling stops between tokens
+    /// and leaves the cache consistent (the last token stays pending).
+    private func stream(maxTokens: Int, stopAtEOS: Bool,
+                        prompt: @escaping @Sendable () async throws -> [Int]) -> AsyncThrowingStream<GeneratedToken, Error> {
         let engine = self.engine, decoder = self.decoder, eosID = self.eosID
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     var clock = ContinuousClock.now
-                    var next = try await engine.prefill(promptIDs)
+                    var next = try await engine.prefill(try await prompt())
                     var reply: [Int] = [], emitted = ""
                     for _ in 0..<maxTokens {
                         let ms = Self.ms(since: clock)
@@ -79,8 +108,7 @@ public final class ModelGenerator: TokenGenerator {
                             emitted = text
                         }
                         continuation.yield(GeneratedToken(id: next, text: piece, ms: ms))
-                        if reply.count == maxTokens { break }
-                        try Task.checkCancellation()
+                        if reply.count == maxTokens || Task.isCancelled { break }
                         clock = ContinuousClock.now
                         next = try await engine.decode(next)
                     }
@@ -115,6 +143,10 @@ actor Engine {
     private var keyCache: NDArray?
     private var valueCache: NDArray?
     private(set) var position = 0
+    /// The last generated token, returned but not yet written to the cache.
+    /// The next prefill or decode feeds it first.
+    private(set) var pending: Int?
+    private var chatStarted = false
 
     init(modelURL: URL, options: SpecializationOptions, padID: Int) async throws {
         let model = try await AIModel(contentsOf: modelURL, options: options)
@@ -161,10 +193,22 @@ actor Engine {
     func reset() {
         (keyCache, valueCache) = Self.zeroCaches(shape: cacheShape, type: cacheType)
         position = 0
+        pending = nil
+        chatStarted = false
     }
 
-    /// Append `ids` at the current position; returns the greedy next token.
-    func prefill(_ ids: [Int]) async throws -> Int {
+    /// Marks the conversation as started; returns whether it already was,
+    /// and the pending token.
+    func beginChatTurn() -> (started: Bool, pending: Int?) {
+        defer { chatStarted = true }
+        return (chatStarted, pending)
+    }
+
+    /// Append the pending token (if any) and `ids` at the current position;
+    /// returns the greedy next token, which becomes pending.
+    func prefill(_ newIDs: [Int]) async throws -> Int {
+        let ids = (pending.map { [$0] } ?? []) + newIDs
+        guard position + ids.count < maxContext else { throw GeneratorError.contextExhausted }
         var next = -1
         for start in stride(from: 0, to: ids.count, by: prefillLength) {
             let chunk = Array(ids[start..<min(start + prefillLength, ids.count)])
@@ -179,13 +223,16 @@ actor Engine {
             next = try await run(prefillFunction, tokens: tokens, positions: positions)
             position += chunk.count
         }
+        pending = next
         return next
     }
 
+    /// Write `token` (the pending one) to the cache; returns the next.
     func decode(_ token: Int) async throws -> Int {
         guard position < maxContext else { throw GeneratorError.contextExhausted }
         let next = try await run(decodeFunction, tokens: [Int32(token)], positions: [Int32(position)])
         position += 1
+        pending = next
         return next
     }
 
