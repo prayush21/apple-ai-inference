@@ -7,15 +7,18 @@ output is a tokens/sec counter rather than a snake move.
 
 Milestones (each gets its own module, mirroring ``snake_ai``):
 
-1. ``download``   fetch weights + tokenizer from Hugging Face       (done)
-2. ``model``      plain-``torch`` Llama re-implementation with
-                  ``register_buffer`` KV caches, loading HF weights
-3. ``convert``    ``torch.export`` → ``coreai_torch`` → ``.aimodel``
-                  with ``prefill`` (dynamic T) and ``decode`` (static
-                  ``[1, 1]``) functions sharing the cache states
-4. ``verify``     PyTorch ≙ Core AI logits over a real prompt + decode
-5. ``play``       stream tokens in the terminal, record tok/s
-6. ``serve``      HTTP bridge (SSE token stream) for the Swift app until
-                  ``CoreAI.framework`` is available on macOS 27
-7. ``bench``      ``llm-bench/1`` JSON records next to ``docs/bench/snake*``
+1. ``download``   fetch weights + tokenizer from Hugging Face            (done)
+2. ``model``      plain-``torch`` Llama with ``register_buffer`` KV
+                  caches; ``reference`` checks it against transformers  (done)
+3. ``convert``    ``torch.export`` → ``coreai_torch`` → ``.aimodel`` with
+                  static ``main_prefill_t64`` and ``main_decode`` sharing
+                  the cache states                                      (done)
+4. ``verify``     PyTorch ≙ Core AI logits over a real prompt + decode   (done)
+5. ``play``       stream tokens in the terminal; ``--bench`` writes
+                  ``llm-bench/1`` records                               (done)
+6. Swift          ``LLMCoreAI.ModelGenerator`` in-process on
+                  ``CoreAI.framework`` (macOS 27), prompts pre-tokenized by
+                  ``prompt_ids``; ``llm-cli`` bench, ``LLMApp`` gauge     (done)
+7. ``serve``      HTTP bridge (SSE token stream) to measure the
+                  per-token network hop                             (deferred)
 """

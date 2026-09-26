@@ -139,3 +139,28 @@ Reading the table:
   Recorded, not explained.
 
 Quality on the human-reviewed holdout is in `decide-quality.md`.
+
+## SmolLM2 (`llm-bench/1`)
+
+macOS 27.0, M2 8 GB, fp16 `SmolLM2Stateful.aimodel` (`main_prefill_t64` +
+`main_decode`), GPU-preferred specialization, greedy, EOS ignored, 128
+generated tokens × 5 runs per prompt length (16 / 128 / 512 tokens, ids
+shared through `data/llm/prompt_ids.json`). One record per (variant,
+runtime, compute, precision, prompt length).
+
+| File | Path |
+|---|---|
+| `llm-python.json` | `python -m llm_ai.play --bench --json` — Python, OS runtime (stateful rows); plus the stateless probe (`scripts/llm_stateless_probe.py`) and the `USE_LOCAL_COREAI=1` probe (macOS 26 CPU runtime) |
+| `llm-swift-coreai.json` | `llm-cli --model ../models/llm/SmolLM2Stateful.aimodel --cold --bench --json` — Swift `ModelGenerator` in-process on `CoreAI.framework`, release build |
+| `llm-verify-fp16.json` | `python -m llm_ai.verify --json` — per-step logit diffs vs PyTorch fp32 |
+
+| Path | Load cold / cached | Prefill 16 / 128 / 512 | Decode p50 / p95 | tok/s |
+|---|---|---|---|---|
+| Python, OS runtime | 14.3 s / 0.6–1.3 s | 54 / 99 / 362 ms | 22.9 / 23.4 ms | 43.5 |
+| Python, local runtime (probe) | — | 3.9 s (16) | 2.07 s | 0.5 |
+| Swift, `CoreAI.framework` | 18.6 s / 2.6–11 s | 69 / 112 / 378 ms | 22.3 / 22.8 ms | 44.7 |
+
+The stateless asset is not in this table: every new sequence length
+recompiles on the OS runtime (9–25 s each), see `docs/coreai-ecosystem.md`
+gotcha 20. `docs/bench/img/llmapp.png` is `LLMApp` after one reply.
+

@@ -8,7 +8,7 @@ project is a self-contained Python package (author · convert · verify · run
 | Project | Python | Swift | Model | Status |
 |---|---|---|---|---|
 | 1. Snake | `snake_ai/` | `SnakeCoreAI/` | 118k-param transformer, KV cache as states | complete; latency baselines in `docs/bench/` |
-| 2. SmolLM2 | `llm_ai/` | `LLMCoreAI/` | SmolLM2-360M-Instruct, KV cache as states, tokens/sec | scaffolded (branch `llm`, `system-one` merged in) |
+| 2. SmolLM2 | `llm_ai/` | `LLMCoreAI/` | SmolLM2-360M-Instruct, KV cache as states, tokens/sec | milestones 1–6 and 8 done (branch `llm`); 44.7 tok/s in-process on `CoreAI.framework`; `serve` deferred |
 | 3. Decide | `decide_ai/` | `DecideCoreAI/` | MiniLM NLI cross-encoder, zero-shot "System One" decisions (text → calibrated yes/no per question) | step 1 done (branch `system-one`): Python pipeline, `/decide` server, holdout, measured three-way comparison vs Jev and Laya |
 
 Shared: one `.venv` (`pyproject.toml`; `pip install -e '.[dev,llm,decide]'` for all),
@@ -229,33 +229,110 @@ model size or teacher quality. Train the minimax-taught student with
 The snake model is too small for any deployment choice to be *felt*: ~4 ms
 per move against a 140 ms game tick. This project repeats the same pipeline —
 plain-`torch` model with `register_buffer` KV caches → `torch.export` →
-`coreai-torch` → `.aimodel` with states → Python runtime / `serve.py` /
-`CoreAI.framework` — on a 360M-parameter decoder-only LLM, where stateless vs
-stateful is "unusable vs readable", the HTTP hop per token is visible, and
-weight loading is long enough for `AIModelCache` to matter.
+`coreai-torch` → `.aimodel` with states → Python runtime / `CoreAI.framework`
+— on a 360M-parameter decoder-only LLM, where stateless vs stateful is
+"unusable vs readable" and weight loading is long enough for `AIModelCache`
+to matter.
+
+SmolLM2-360M-Instruct is a Llama: 32 layers, hidden 960, 15 query heads / 5
+KV heads (GQA, `n_rep` 3), head dim 64, vocab 49152, tied embeddings. The
+cache is 1024 slots, one state per K and V: `[32, 1, 5, 1024, 64]`, 21 MB
+each in fp16.
+
+### Layout
+
+| Path | What |
+|---|---|
+| `llm_ai/download.py` | Fetch `model.safetensors` + tokenizer/config only (726 MB, bf16) |
+| `llm_ai/model.py` | `SmolLM` (stateless) and `SmolLMStateful` (KV caches as buffers, `scatter` writes, last-token logits), HF weights loaded by name with every tensor accounted for; `left_pad` |
+| `llm_ai/tokenizer.py` | `tokenizers` encode + the chat template spelled out |
+| `llm_ai/reference.py` | Logits vs `transformers` (1.1e-4 max diff, fp32) and stateful ≙ stateless for 64 greedy steps → `data/llm/golden.json` |
+| `llm_ai/convert.py` | One asset, two static functions sharing the states: `main_prefill_t64` + `main_decode` (fp16, 725 MB, ~20–35 s) |
+| `llm_ai/runtime.py` | `StatefulLM` / `StatelessLM` over `coreai.runtime` (chunked, left-padded prefill; GPU-preferred specialization) |
+| `llm_ai/verify.py` | PyTorch fp32 vs Core AI on a chat prompt, 32 decode steps, reset, chunked prefill → `docs/bench/llm-verify-fp16.json` |
+| `llm_ai/play.py` | Streamed chat in the terminal; `--bench` writes `llm-bench/1` records |
+| `llm_ai/prompt_ids.py` | Pre-tokenized prompts + PyTorch greedy reference for Swift → `data/llm/prompt_ids.json` |
+| `scripts/llm_*.py` | Shared-state proof on a 2-layer model, the Neural Engine repro (gotcha 17), the stateless probe (gotcha 20) |
+| `LLMCoreAI/` | `ModelGenerator` (`CoreAI.framework`, in-process), `ByteLevelDecoder` (ids → text from `tokenizer.json`), `llm-cli` (self-check, chat, bench), `LLMApp` (SwiftUI, tok/s gauge) |
+
+### Quick start
 
 ```bash
-.venv/bin/pip install -e '.[dev,llm]'                       # adds huggingface_hub, safetensors, tokenizers
+.venv/bin/pip install -e '.[dev,llm]'
 ```
 
 ```bash
-.venv/bin/python -m llm_ai.download                        # models/llm/hf/SmolLM2-360M-Instruct (~725 MB, gitignored)
+.venv/bin/python -m llm_ai.download && .venv/bin/python -m llm_ai.reference
 ```
 
 ```bash
-cd LLMCoreAI && swift build && swift run llm-cli           # reports which generator this build can use
+.venv/bin/python -m llm_ai.convert && .venv/bin/python -m llm_ai.verify
 ```
 
-Milestones are listed in `llm_ai/__init__.py`; only `download` and the
-config loader (`llm_ai.model.LlamaConfig.from_hf`) exist so far. SmolLM2-360M
-is a Llama: 32 layers, hidden 960, 15 query heads / 5 KV heads (GQA, `n_rep`
-3), head dim 64, vocab 49152, tied embeddings. With `max_seq_len = 1024` each
-cache state is `[32, 1, 5, 1024, 64]` fp32 ≈ 42 MB.
+```bash
+.venv/bin/python -m llm_ai.play "Why is the sky blue?"
+```
 
-`LLMCoreAI` mirrors `SnakeCoreAI`: a `TokenGenerator` protocol,
-`RemoteGenerator` (SSE stream from `llm_ai.serve`, port 8770) and
-`ModelGenerator` (`CoreAI.framework`, compiled only on Xcode 27+), an
-`llm-cli` for benches and a SwiftUI `LLMApp` with a tokens/sec gauge.
+```bash
+cd LLMCoreAI && swift build -c release && .build/release/llm-cli --model ../models/llm/SmolLM2Stateful.aimodel --chat 0
+```
+
+```bash
+cd LLMCoreAI && .build/release/llm-cli --model ../models/llm/SmolLM2Stateful.aimodel --cold --bench --json ../docs/bench/llm-swift-coreai.json
+```
+
+The first load of the asset from each program (Python, `llm-cli`, `LLMApp`)
+specializes it: 15–30 s, a 1.4 GB entry in `~/Library/Caches/coreai-cache`,
+and several GB of transient disk and memory on the way (gotcha 18). Delete
+entries you no longer need.
+
+### What we measured
+
+M2, 8 GB, macOS 27.0, fp16 asset, GPU-preferred specialization, greedy, 128
+generated tokens × 5 runs per prompt length, EOS ignored. Records in
+`docs/bench/llm-*.json`; `uptime` load averages 2–4 during the runs.
+
+| Row | Load (cold / cached) | Prefill 16 / 128 / 512 tokens | Decode p50 / p95 | tok/s |
+|---|---|---|---|---|
+| Stateless (full recompute), Python OS runtime | 15.1 s cold, then 9.3 s for the first call | 37–40 ms per call *once a length is compiled*; every new length recompiles for 9–25 s (gotcha 20) | — | not runnable token by token |
+| Stateful, Python OS runtime | 14.3 s / 0.6–1.3 s | 54 / 99 / 362 ms | 22.9 / 23.4 ms | 43.5 |
+| Stateful, Python `USE_LOCAL_COREAI=1` (macOS 26 CPU runtime) | not timed | 3.9 s (16) | 2.07 s | 0.5 (probe; full run ~1 h, skipped) |
+| **Stateful, Swift `CoreAI.framework`** (`llm-cli`, release) | **18.6 s / 2.6–11 s** | **69 / 112 / 378 ms** | **22.3 / 22.8 ms** | **44.7** |
+| Swift → `serve` over HTTP | deferred (milestone 7) | | | |
+| fp32 vs fp16 | only fp16 measured: an fp32 asset (1.45 GB + ~2.9 GB per program) does not fit the free disk | | | |
+
+- **Greedy output matches the reference.** Core AI fp16 vs PyTorch fp32: 32/32
+  top-1 over a prefill + 32 decode steps, max |logit diff| ≤ 0.035; a
+  175-token prompt through three 64-token chunks agrees too; `llm-cli`
+  re-checks 32/32 before every bench. The reply to the commit-message
+  prompt reads coherently (below).
+- **Decode is flat.** 22.3–22.9 ms from a 16- to a 512-token prompt: the
+  attention always spans all 1024 slots (gotcha 6), so context length does
+  not show up at this size. Prefill grows with the number of 64-token chunks.
+- **No stateless/stateful crossover.** Even with the shape already compiled,
+  stateless at T = 16 (37 ms) is slower than a stateful decode step (23 ms),
+  and on the OS runtime every new sequence length is a fresh compile.
+- **~45 tok/s is about a third of the bandwidth ceiling.** 0.72 GB of fp16
+  weights per token at 22.3 ms is ~32 GB/s against the M2's ~100 GB/s. Not
+  profiled yet; well above the "look at the profiler" line of 20 tok/s.
+- **Swift ≙ Python per token** once the caches are moved rather than copied
+  into the call (gotcha 19: 26.1 → 22.3 ms). Swift cached loads are slower
+  and noisier than Python's (2.6–11 s vs 0.6–1.3 s); not investigated.
+- **The macOS 26 runtime is ~90× slower** per token (2.07 s): the interim
+  CPU runtime of gotcha 13.
+
+![LLMApp](docs/bench/img/llmapp.png)
+
+### Status
+
+- [x] 1. `download` — 726 MB, bf16
+- [x] 2. `model` — plain torch, `transformers` reference check, golden run
+- [x] 3. `convert` — one fp16 asset, `main_prefill_t64` + `main_decode` sharing states (proved on a 2-layer model first); t16/t128/t512 dropped for disk (gotcha 18)
+- [x] 4. `verify` — 32/32 top-1, reset, in-place states, chunked prefill
+- [x] 5. `play` — streamed chat + `docs/bench/llm-python.json`
+- [x] 6. Swift `ModelGenerator` on `CoreAI.framework`, `llm-cli --json` → `docs/bench/llm-swift-coreai.json`, `LLMApp` screenshot. Prompts are pre-tokenized in Python; Swift decodes ids. A Swift BPE **encoder** is still the stretch goal.
+- [ ] 7. `serve` — **deferred.** The per-token HTTP hop was already measured on snake (6.8 ms round trip vs 4.3 ms server-side); here it would need a third 1.4 GB specialization copy on a disk that has ~8 GB free. `RemoteGenerator` still only probes `/info`.
+- [x] 8. This section and gotchas 16–21 in `docs/coreai-ecosystem.md`
 
 ---
 

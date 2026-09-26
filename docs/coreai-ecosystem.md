@@ -168,6 +168,78 @@ The honest comparison today is PyTorch on the CPU (what a user without a
 GPU gets): ~0.3 s for a 5-question request on a quiet M2, ~35–60 s to load. See
 `docs/bench/decide-laya.json`.
 
+## Decoder LLMs (`llm_ai`, SmolLM2-360M)
+
+Observed on macOS 27.0 (OS runtime from Python, `CoreAI.framework` from
+Swift), M2 with **8 GB**, `coreai-torch 0.4.2`, torch 2.12, converting
+SmolLM2-360M-Instruct (32 layers, GQA 15/5 heads, 1024-slot fp16 KV-cache
+states) as one asset with `main_prefill_t64` + `main_decode`.
+
+16. **Grouped-query attention: reshape once, after the head permute.**
+    Folding the `n_rep` query heads of each KV group into the row axis
+    (`q.reshape(B, KV, n_rep*T, hd)`), or reshaping the attention output
+    to `[B, H, T, hd]` before transposing, makes `torch.export` emit a stride
+    guard such as `Eq(Min(8*s, 24*s), 8*s)` for the dynamic T and fail with
+    "Constraints violated (seq)". Splitting heads as `[B, KV, n_rep, T, hd]`,
+    broadcasting `k[:, :, None]` in the matmul, and going back with one
+    `permute(0, 3, 1, 2, 4).reshape(B, T, H*hd)` exports cleanly and never
+    materialises repeated keys (`llm_ai/model.py`).
+
+17. **Default specialization sends an fp16 graph to the Neural Engine, and
+    on this machine it does not load.** The four-function 360M asset spent
+    ~6 min compiling, wrote a 2.65 GB cache entry, logged
+    `'anec.scaled_elementwise' op inferred type(s) 'memref<1x128x128x960xf16>'
+    are incompatible with return type(s) 'memref<1x1x128x960xf16>'`, and
+    then aborted on an MPSGraph assertion ("Error occurred when loading ANE
+    module"). A single attention block at the same width, fp16, fails to
+    load with "Program load failed — no memory (transient; retry under lower
+    memory pressure)" at any T, in either GQA formulation
+    (`scripts/llm_ane_permute_repro.py`). The same graph loads with
+    `SpecializationOptions.from_preferred_compute_unit_kind(gpu)` (Swift:
+    `SpecializationOptions(preferredComputeUnitKind: .gpu)`), and in fp32
+    with default options. Everything in `llm_ai` / `LLMCoreAI` therefore
+    prefers the GPU. Not tried on a machine with more memory.
+
+18. **Specialization costs one weight copy per static function, and more on
+    the way.** The cache entry for the two-function fp16 asset is 1.4 GB
+    (2 × 0.7 GB); the crashed four-function attempt had written 2.65 GB.
+    During a GPU specialization the process peaked at 4.7 GB RSS (four
+    functions) and free disk dropped by > 4 GB: MPSGraph builds packages in
+    `$TMPDIR/com.apple.MetalPerformanceShadersGraph/mpsgraph-<pid>-…`, and
+    on an 8 GB machine swap (on the same APFS container) grows too. A
+    killed process leaves its `mpsgraph-*` directory behind. So each extra
+    enumerated shape is paid in cache disk, load time and peak memory; the
+    t16/t128/t512 prefill set was cut to t64 (chunked) to fit. With
+    explicit `SpecializationOptions`, Python's entry lives under
+    `coreai-cache/<OS build>/org.python.python/<hash>`, not
+    `coreai-cache/<python version>/<hash>`.
+
+19. **Move the state NDArrays into the call; don't copy them.** The
+    `var keys = keyCache` pattern (needed because `MutableViews` borrows
+    both caches, which exclusivity forbids on two stored properties) leaves
+    two references to each buffer, so taking the mutable view copies both.
+    For 2 × 21 MB caches that was 3.8 ms per decode step (26.1 → 22.3 ms
+    after switching to `Optional` properties and `keyCache.take()`, written
+    back in a `defer`). The snake `ModelPlayer` uses the same pattern with
+    256 KB caches, where it does not show.
+
+20. **On the OS runtime, dynamic shapes recompile per new size.** The
+    stateless asset (`input_ids [1, ?]`) runs a repeated length in 37–40 ms,
+    but the first call at each new length took 9–25 s and added ~450 MB of
+    MPSGraph temporaries that stay until the process exits. Token-by-token
+    generation calls it with a new length every step, so it cannot run at
+    all here (`scripts/llm_stateless_probe.py`). Gotcha 7 described static
+    shapes as a ~18 % speed-up for snake; for an LLM on the OS runtime
+    they are a requirement.
+
+21. **Loads.** Cold (specializing) loads were 14–31 s. Cached loads were
+    0.6–1.3 s from Python (`AIModel.load` plus `load_function` for both
+    functions; `AIModel.load` alone returns in ~15 ms) and 2.6–11 s from
+    Swift, run to run. Calling `AIModelCache.default.model(for:options:)`
+    as an "is it cached?" probe right before loading made the following
+    load take 13 s; `llm-cli` labels cold/cached from `--cold`
+    (`AIModelCache.default.deleteEntry(for:options:)`) instead.
+
 ## Profiling and debugging from Python
 
 | Xcode 27 tool | Python equivalent | Where |
