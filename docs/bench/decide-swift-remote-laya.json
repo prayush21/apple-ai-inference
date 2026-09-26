@@ -1,0 +1,114 @@
+{
+  "config" : {
+    "backend" : "swift-remote-laya",
+    "budget_s" : "60.0",
+    "calls" : "200",
+    "inputs" : "data\/decide\/holdout.jsonl states x data\/decide\/bench_questions.json",
+    "min_calls" : "30",
+    "note" : "Laya pads to its own sequence, so N only and L is null; the server reports no infer split",
+    "url" : "http:\/\/127.0.0.1:8771",
+    "warmup" : "5"
+  },
+  "host" : {
+    "chip" : "Apple M2",
+    "machine" : "arm64",
+    "macos" : "Version 26.3 (Build 25D125)"
+  },
+  "recorded_at" : "2026-09-21T03:35:50Z",
+  "rows" : [
+    {
+      "L" : null,
+      "N" : 1,
+      "asset" : "laya",
+      "first_call_ms" : 359.437375,
+      "http_overhead_p50_ms" : 1.5038959932283547,
+      "roundtrip_ms" : {
+        "count" : 200,
+        "max" : 384.183125,
+        "mean" : 139.39144503,
+        "min" : 128.884958,
+        "p50" : 135.4983335,
+        "p95" : 142.34060034999982
+      },
+      "server_total_ms" : {
+        "count" : 200,
+        "max" : 381.7716670164373,
+        "mean" : 137.85263192592538,
+        "min" : 127.2953330189921,
+        "p50" : 133.99443750677165,
+        "p95" : 140.78626038535714
+      }
+    },
+    {
+      "L" : null,
+      "N" : 4,
+      "asset" : "laya",
+      "first_call_ms" : 282.482292,
+      "http_overhead_p50_ms" : 1.5531459979132478,
+      "roundtrip_ms" : {
+        "count" : 200,
+        "max" : 648.34575,
+        "mean" : 276.1394945249998,
+        "min" : 229.9755,
+        "p50" : 264.8980415,
+        "p95" : 303.19024024999993
+      },
+      "server_total_ms" : {
+        "count" : 200,
+        "max" : 646.2052910064813,
+        "mean" : 274.55389122027555,
+        "min" : 228.43683400424197,
+        "p50" : 263.34489550208673,
+        "p95" : 301.41737325902784
+      }
+    },
+    {
+      "L" : null,
+      "N" : 8,
+      "asset" : "laya",
+      "first_call_ms" : 469.338458,
+      "http_overhead_p50_ms" : 1.5654589935310241,
+      "roundtrip_ms" : {
+        "count" : 129,
+        "max" : 921.779709,
+        "mean" : 465.7085194263564,
+        "min" : 391.021584,
+        "p50" : 449.336459,
+        "p95" : 532.5435418
+      },
+      "server_total_ms" : {
+        "count" : 129,
+        "max" : 919.7324579872657,
+        "mean" : 464.10151904917234,
+        "min" : 389.4478750007693,
+        "p50" : 447.77100000646897,
+        "p95" : 530.4891420004424
+      }
+    },
+    {
+      "L" : null,
+      "N" : 16,
+      "asset" : "laya",
+      "first_call_ms" : 952.122291,
+      "http_overhead_p50_ms" : 1.6086875131285296,
+      "roundtrip_ms" : {
+        "count" : 66,
+        "max" : 1248.875084,
+        "mean" : 913.142519575758,
+        "min" : 820.093,
+        "p50" : 896.9024165,
+        "p95" : 1039.41735425
+      },
+      "server_total_ms" : {
+        "count" : 66,
+        "max" : 1246.4051249844488,
+        "mean" : 911.4843276201458,
+        "min" : 818.4798339789268,
+        "p50" : 895.2937289868714,
+        "p95" : 1037.8424372611335
+      }
+    }
+  ],
+  "runtime" : "convaiinnovations\/laya (PyTorch, CPU) via decide_ai.serve --backend laya (HTTP from Swift)",
+  "schema" : "decide-bench\/1"
+}

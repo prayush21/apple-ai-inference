@@ -1,0 +1,234 @@
+{
+  "config" : {
+    "backend" : "swift-coreai",
+    "budget_s" : "60.0",
+    "build" : "release",
+    "calls" : "200",
+    "inputs" : "data\/decide\/bench_ids.json (holdout states x bench_questions, tokenized by decide_ai.bench_ids)",
+    "loadavg_1m_after" : "3.74",
+    "loadavg_1m_before" : "3.63",
+    "min_calls" : "30",
+    "model" : "models\/decide\/NLICrossEncoder.aimodel",
+    "note" : "infer_ms is Decider.logits: NDArray build + run + reading logits, inputs pre-tokenized and pre-padded",
+    "reference_max_abs_diff" : "5.96e-07",
+    "warmup" : "20"
+  },
+  "host" : {
+    "chip" : "Apple M2",
+    "machine" : "arm64",
+    "macos" : "Version 27.0 (Build 26A428)"
+  },
+  "recorded_at" : "2026-09-23T02:52:56Z",
+  "rows" : [
+    {
+      "L" : 64,
+      "N" : 1,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 71.100875,
+      "function" : "main",
+      "function_load_ms" : 1.367792,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 11.199875,
+        "mean" : 5.8243889100000015,
+        "min" : 4.45925,
+        "p50" : 4.8799375000000005,
+        "p95" : 9.383377399999999
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    },
+    {
+      "L" : 128,
+      "N" : 1,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 90.951459,
+      "function" : "main",
+      "function_load_ms" : 5.568208,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 18.921375,
+        "mean" : 10.114016264999997,
+        "min" : 7.615834,
+        "p50" : 9.2754165,
+        "p95" : 15.317816949999997
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    },
+    {
+      "L" : 64,
+      "N" : 4,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 100.3955,
+      "function" : "main",
+      "function_load_ms" : 2.416417,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 16.386833,
+        "mean" : 13.556938894999996,
+        "min" : 13.1235,
+        "p50" : 13.283666499999999,
+        "p95" : 15.118912499999999
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    },
+    {
+      "L" : 128,
+      "N" : 4,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 104.397042,
+      "function" : "main",
+      "function_load_ms" : 7.693958,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 31.17375,
+        "mean" : 27.549361519999994,
+        "min" : 24.656084,
+        "p50" : 27.532542,
+        "p95" : 29.941079449999997
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    },
+    {
+      "L" : 64,
+      "N" : 8,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 104.576584,
+      "function" : "main",
+      "function_load_ms" : 4.944792,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 30.912667,
+        "mean" : 26.879434394999993,
+        "min" : 24.109292,
+        "p50" : 26.5873335,
+        "p95" : 28.92126635
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    },
+    {
+      "L" : 128,
+      "N" : 8,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 129.669292,
+      "function" : "main",
+      "function_load_ms" : 5.385625,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 57.303708,
+        "mean" : 48.33012143999998,
+        "min" : 47.125208,
+        "p50" : 47.494542,
+        "p95" : 52.1201875
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    },
+    {
+      "L" : 64,
+      "N" : 16,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 66.775916,
+      "function" : "main",
+      "function_load_ms" : 4.697875,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 54.00025,
+        "mean" : 49.914674025000004,
+        "min" : 46.316667,
+        "p50" : 49.949375,
+        "p95" : 51.4503524
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    },
+    {
+      "L" : 128,
+      "N" : 16,
+      "asset" : "NLICrossEncoder.aimodel",
+      "first_call_ms" : 188.828958,
+      "function" : "main",
+      "function_load_ms" : 3.246833,
+      "infer_ms" : {
+        "count" : 200,
+        "max" : 103.745542,
+        "mean" : 96.99352065000001,
+        "min" : 94.595459,
+        "p50" : 95.4377085,
+        "p95" : 100.8058319
+      },
+      "load_ms" : {
+        "all" : [
+          12.133292,
+          0.791,
+          0.730792
+        ],
+        "first" : 12.133292,
+        "rest_mean" : 0.760896
+      },
+      "variant" : "dynamic"
+    }
+  ],
+  "runtime" : "CoreAI.framework (Swift, in-process, default specialization)",
+  "schema" : "decide-bench\/1"
+}

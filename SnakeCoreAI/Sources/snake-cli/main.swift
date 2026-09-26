@@ -2,7 +2,7 @@ import Foundation
 import SnakeCoreAI
 import SnakeEngine
 
-// snake-cli [--model path.aimodel] [--ai heuristic|minimax|model] [--games N] [--render] [--seed S] [--json out.json]
+// snake-cli [--model path.aimodel [--function main|main_decode]] [--ai heuristic|minimax|model] [--games N] [--render] [--seed S] [--json out.json]
 //
 // --ai model uses the Core AI model served by `python -m snake_ai.serve`.
 // --json writes load + per-move inference stats in the same `snake-bench/1`
@@ -14,6 +14,7 @@ import SnakeEngine
 
 var args = CommandLine.arguments.dropFirst()
 var modelPath: String?
+var functionName = "main"
 var games = 1
 var render = false
 var seed: UInt64 = 100
@@ -22,6 +23,7 @@ var jsonPath: String?
 while let a = args.popFirst() {
     switch a {
     case "--model": modelPath = args.popFirst()
+    case "--function": functionName = args.popFirst() ?? "main"
     case "--ai": ai = args.popFirst() ?? "minimax"
     case "--games": games = Int(args.popFirst() ?? "1") ?? 1
     case "--render": render = true
@@ -45,7 +47,8 @@ func fallback(_ ai: String, seed: UInt64) async throws -> any SnakePlayer {
 func makePlayer0(modelPath: String?, ai: String, seed: UInt64) async throws -> any SnakePlayer {
     guard let modelPath else { return try await fallback(ai, seed: seed) }
     do {
-        return try await ModelPlayer(modelURL: URL(fileURLWithPath: modelPath))
+        guard #available(macOS 27, iOS 27, *) else { throw ModelError.coreAIUnavailable }
+        return try await ModelPlayer(modelURL: URL(fileURLWithPath: modelPath), functionName: functionName)
     } catch ModelError.coreAIUnavailable {
         print("CoreAI.framework unavailable in this SDK/OS (needs macOS 27); falling back to \(ai) for snake 0.")
         return try await fallback(ai, seed: seed)

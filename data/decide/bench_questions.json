@@ -1,0 +1,18 @@
+{
+  "is_complaint": {"instructions": "Is the customer complaining?", "hypothesis": "The customer is complaining."},
+  "wants_refund": {"instructions": "Is the customer asking for a refund?", "hypothesis": "The customer is asking for a refund."},
+  "about_shipping": {"instructions": "Is this message about shipping or delivery?", "hypothesis": "This message is about shipping or delivery."},
+  "about_product_quality": {"instructions": "Is this message about product quality?", "hypothesis": "This message is about product quality."},
+  "urgent": {"instructions": "Is this urgent?", "hypothesis": "This is urgent."},
+  "has_order_number": {"instructions": "Does the message mention a specific order number?", "hypothesis": "The message mentions a specific order number."},
+  "wants_replacement": {"instructions": "Is the customer asking for a replacement?", "hypothesis": "The customer is asking for a replacement."},
+  "positive_sentiment": {"instructions": "Is the customer happy?", "hypothesis": "The customer is happy."},
+  "about_billing": {"instructions": "Is this about billing or payment?", "hypothesis": "This is about billing or payment."},
+  "about_account_access": {"instructions": "Is this about logging in or account access?", "hypothesis": "This is about logging in or account access."},
+  "wants_to_cancel": {"instructions": "Does the customer want to cancel something?", "hypothesis": "The customer wants to cancel something."},
+  "asks_a_question": {"instructions": "Is the customer asking a question?", "hypothesis": "The customer is asking a question."},
+  "threatens_escalation": {"instructions": "Does the customer threaten to escalate, dispute or take legal action?", "hypothesis": "The customer threatens to escalate, dispute or take legal action."},
+  "mentions_a_date": {"instructions": "Does the message mention a specific date or deadline?", "hypothesis": "The message mentions a specific date or deadline."},
+  "wrong_item": {"instructions": "Did the customer receive the wrong item?", "hypothesis": "The customer received the wrong item."},
+  "asks_for_a_human": {"instructions": "Is the customer asking to speak to a person?", "hypothesis": "The customer is asking to speak to a person."}
+}

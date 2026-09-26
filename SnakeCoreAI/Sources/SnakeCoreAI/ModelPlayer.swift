@@ -28,15 +28,14 @@ public struct StatelessModelPlayer: SnakePlayer {
         history.append(FeatureExtractor.features(of: game, for: snakeID))
 
         // Create an NDArray for the next input and write board features into it.
-        var inputFeatures = NDArray(shape: [1, history.count, FeatureExtractor.featureDim], scalarType: .float32)
-        inputFeatures.mutableView(as: Float.self).write(rows: history)
+        let inputFeatures = NDArray(scalars: history.joined(), shape: [1, history.count, FeatureExtractor.featureDim])
 
         // Run inference and extract the expected logits output NDArray.
         var outputs = try await nextActionFunction.run(inputs: ["features": inputFeatures])
         guard let logits = outputs.remove("logits")?.ndArray else {
             throw ModelError.missingOutput("logits")
         }
-        return predictedDirection(fromLogits: logits.view(as: Float.self).lastRow(width: 4), game: game, snakeID: snakeID)
+        return predictedDirection(fromLogits: lastStepLogits(logits), game: game, snakeID: snakeID)
     }
 }
 
@@ -52,8 +51,9 @@ public struct StatelessModelPlayer: SnakePlayer {
 public struct ModelPlayer: SnakePlayer {
     let nextActionFunction: InferenceFunction
 
-    var keyCache: NDArray
-    var valueCache: NDArray
+    // Optional so a move can take them out (see `chooseAction`); nil only during a call.
+    var keyCache: NDArray?
+    var valueCache: NDArray?
     private let maxContext: Int
     private var position = 0
 
@@ -65,30 +65,45 @@ public struct ModelPlayer: SnakePlayer {
         self.nextActionFunction = function
 
         // The model was converted with fixed-size caches for a maximum context
-        // length. Read the exact shape from the function's state descriptor
-        // instead of hard-coding [layers, 1, maxContext, hiddenDim].
-        let keyShape = function.stateDescriptor(named: "keyCache").shape
-        let valueShape = function.stateDescriptor(named: "valueCache").shape
-        self.keyCache = NDArray(shape: keyShape, scalarType: .float32)
-        self.valueCache = NDArray(shape: valueShape, scalarType: .float32)
-        self.maxContext = keyShape[2]
+        // length. Allocate them from the function's state descriptors instead
+        // of hard-coding [layers, 1, maxContext, hiddenDim].
+        func stateArray(_ name: String) throws -> NDArray {
+            guard case .ndArray(let d)? = function.descriptor.stateDescriptor(of: name) else {
+                throw ModelError.missingState(name)
+            }
+            return NDArray(descriptor: d)
+        }
+        let keys = try stateArray("keyCache")
+        self.keyCache = keys
+        self.valueCache = try stateArray("valueCache")
+        self.maxContext = keys.shape[2]
     }
 
     public mutating func chooseAction(game: SnakeGame, snakeID: Int) async throws -> Direction {
         guard position < maxContext else { throw ModelError.contextExhausted }
 
         // Only the newest board state is needed; history lives in the caches.
-        var inputFeatures = NDArray(shape: [1, 1, FeatureExtractor.featureDim], scalarType: .float32)
-        inputFeatures.mutableView(as: Float.self).write(rows: [FeatureExtractor.features(of: game, for: snakeID)])
+        let inputFeatures = NDArray(scalars: FeatureExtractor.features(of: game, for: snakeID), shape: [1, 1, FeatureExtractor.featureDim])
 
         // position_ids is int32 in the converted model (coreai-torch maps int64 -> int32).
-        var positionIDs = NDArray(shape: [1, 1], scalarType: .int32)
-        positionIDs.mutableView(as: Int32.self).write(rows: [[Int32(position)]])
+        let positionIDs = NDArray(scalars: [Int32(position)], shape: [1, 1])
 
-        // Views of the caches are handed to the runtime as mutable state.
+        // Views of the caches are handed to the runtime as mutable state. The
+        // views borrow both caches at once, which exclusivity forbids on two
+        // stored properties of `self`, so they move into locals for the call.
+        // Moved, not copied: `var keys = keyCache` would leave two references
+        // to the storage and taking the mutable view would copy both caches
+        // every move (gotcha 19).
+        guard var keys = keyCache.take(), var values = valueCache.take() else {
+            throw ModelError.missingState("keyCache/valueCache")
+        }
+        defer {
+            keyCache = keys
+            valueCache = values
+        }
         var stateViews = InferenceFunction.MutableViews()
-        stateViews.insert(&keyCache, for: "keyCache")
-        stateViews.insert(&valueCache, for: "valueCache")
+        stateViews.insert(&keys, for: "keyCache")
+        stateViews.insert(&values, for: "valueCache")
 
         var outputs = try await nextActionFunction.run(
             inputs: ["features": inputFeatures, "position_ids": positionIDs],
@@ -97,7 +112,7 @@ public struct ModelPlayer: SnakePlayer {
             throw ModelError.missingOutput("logits")
         }
         position += 1
-        return predictedDirection(fromLogits: logits.view(as: Float.self).lastRow(width: 4), game: game, snakeID: snakeID)
+        return predictedDirection(fromLogits: lastStepLogits(logits), game: game, snakeID: snakeID)
     }
 }
 
@@ -119,33 +134,15 @@ public enum ModelPreparation {
     }
 }
 
-// MARK: - View helpers
-//
-// The session shows `NDArray.MutableView<Float>` / `NDArray.View<Float>` being
-// passed around but not their element API. These two helpers are the only
-// places that touch elements; adjust them against the Xcode 27 SDK if the
-// accessor names differ (e.g. subscript vs. withUnsafeBufferPointer).
+// MARK: - Output helper
 
+/// The 4 action logits of the newest step from `logits[1, T, 4]`. Reads
+/// through the strides: the runtime may hand back a non-contiguous buffer.
 @available(macOS 27, iOS 27, *)
-extension NDArray.MutableView {
-    /// Write a row-major `[rows][cols]` table into a view of shape `[1, rows, cols]` or `[rows, cols]`.
-    mutating func write(rows: [[Element]]) {
-        var i = 0
-        for row in rows {
-            for v in row {
-                self[i] = v
-                i += 1
-            }
-        }
-    }
-}
-
-@available(macOS 27, iOS 27, *)
-extension NDArray.View {
-    /// Last `width` elements of a row-major buffer (the logits for the newest step).
-    func lastRow(width: Int) -> [Element] {
-        let n = count
-        return (n - width..<n).map { self[$0] }
+func lastStepLogits(_ logits: NDArray) -> [Float] {
+    logits.view(as: Float.self).withUnsafePointer { p, shape, strides in
+        let base = (shape[1] - 1) * strides[1]
+        return (0..<shape[2]).map { p[base + $0 * strides[2]] }
     }
 }
 
