@@ -13,8 +13,23 @@ import LLMCoreAI
 // sends that message after loading, and LLM_SNAPSHOT=<path.png> then renders
 // the window's content to that file.
 
+/// A SwiftPM executable is not an .app bundle, so macOS launches it as a
+/// background process: the window shows, but keystrokes stay with the
+/// terminal. Registering as a regular app and activating fixes typing.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate()
+        NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
 @main
 struct LLMApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup("SmolLM2 · Core AI") {
             if #available(macOS 27, *) {
