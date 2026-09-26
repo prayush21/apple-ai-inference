@@ -8,8 +8,9 @@ teacher-forced into the Core AI asset so every step compares the same
 context: prefill, then 32 decode steps, max |logit diff| per step and top-1
 agreement. Pass: all 32 top-1 equal for an fp32 asset, >= 31/32 for fp16.
 
-Also checks that the runtime mutates the states in place and that a reset
-(fresh zeroed caches) reproduces the first prefill exactly.
+Also checks that the runtime mutates the states in place, that a reset
+(fresh zeroed caches) reproduces the first prefill exactly, and that a prompt
+longer than the prefill function (several chunks) matches PyTorch.
 """
 
 from __future__ import annotations
@@ -28,6 +29,16 @@ from .runtime import COMPUTE_UNITS, DEFAULT_STATEFUL, StatefulLM
 from .tokenizer import DEFAULT_MODEL_DIR, ChatTokenizer
 
 VERIFY_PROMPT = "Give me three tips for writing clear commit messages."
+# ~170 tokens with the chat template: three chunks through main_prefill_t64.
+LONG_PROMPT = (
+    "Here is a short story. A snake lived in a small terminal window. Every turn it looked at sixteen "
+    "numbers describing the board and chose to go up, down, left or right. It had a memory of every move "
+    "it had made, stored in a cache that never forgot, so it did not have to think about the past twice. "
+    "One day a much larger model moved into the same machine. It had thirty-two layers and a vocabulary "
+    "of forty-nine thousand words, and it also kept a cache, one slot per word it had read. The two of "
+    "them shared the Neural Engine, the GPU and eight gigabytes of memory, and they did not always get "
+    "along. Summarize the story in one sentence."
+)
 
 
 @torch.no_grad()
@@ -79,6 +90,17 @@ async def run(a: argparse.Namespace) -> dict:
     reset_diff = float(np.abs(again.astype(np.float32) - first.astype(np.float32)).max())
     print(f"reset: prefill after fresh caches differs from the first by {reset_diff:.2e}")
 
+    lm.reset()
+    long_ids = tok.encode_chat(LONG_PROMPT)
+    chunked = (await lm.prefill_ids(long_ids)).astype(np.float32)
+    from .model import SmolLM
+
+    with torch.no_grad():
+        full = SmolLM.from_hf(a.model_dir)(torch.tensor([long_ids]))[0, -1].numpy()
+    long_diff = float(np.abs(chunked - full).max())
+    long_top1 = int(chunked.argmax()) == int(full.argmax())
+    print(f"chunked prefill of {len(long_ids)} tokens: max |logit diff| {long_diff:.4f}, top-1 {'agrees' if long_top1 else 'DIFFERS'}")
+
     record = {
         "asset": str(a.asset),
         "precision": precision,
@@ -90,12 +112,14 @@ async def run(a: argparse.Namespace) -> dict:
         "top1_agreement": agree,
         "diverging_steps": [int(i) for i in np.nonzero(~top1[: a.steps])[0]],
         "reset_diff": reset_diff,
+        "chunked_prefill": {"prompt_tokens": len(long_ids), "max_abs_logit_diff": round(long_diff, 5), "top1_agrees": long_top1},
         "compute": a.compute,
         "load_ms": round(lm.load_ms, 1),
         "reference_text": tok.decode(tokens),
     }
     assert agree >= need, f"top-1 agreement {agree}/{a.steps}"
     assert reset_diff == 0.0
+    assert long_top1, "chunked prefill top-1 differs from PyTorch"
     return record
 
 

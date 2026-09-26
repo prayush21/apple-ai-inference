@@ -5,16 +5,21 @@
     python -m llm_ai.convert --precision fp32
 
 Stateful asset: one ``AIProgram`` exported with a dynamic T, then pinned by a
-single ``set_static_shape_config`` call to four static entrypoints that share
+single ``set_static_shape_config`` call to two static entrypoints that share
 the ``keyCache`` / ``valueCache`` states (gotchas 7, 8, 12)::
 
-    main_prefill_t16   input_ids / position_ids [1, 16]
-    main_prefill_t128                           [1, 128]
-    main_prefill_t512                           [1, 512]
+    main_prefill_t64   input_ids / position_ids [1, 64]
     main_decode                                 [1, 1]
 
-A prompt is left-padded to the next prefill size (``model.left_pad``). Every
-function returns ``logits [1, 1, vocab]`` for the last token only.
+A prompt is split into 64-token chunks and the last one is left-padded
+(``model.left_pad``, ``runtime.StatefulLM.prefill_ids``). Every function
+returns ``logits [1, 1, vocab]`` for the last token only.
+
+Why only one prefill size: each static function gets its own specialized
+copy of the weights at first load. With t16/t128/t512 + decode, loading the
+fp16 asset on this 8 GB M2 peaked at 4.7 GB RSS and drained > 4 GB of disk
+(gotcha 18). 64 covers a one-turn chat prompt with the default system
+message (~40 tokens) in a single call.
 
 Stateless asset (``SmolLM2.aimodel``): ``input_ids [1, T]`` dynamic up to
 ``max_seq_len``, ``logits [1, T, vocab]``.
@@ -41,7 +46,7 @@ from .model import SmolLM, SmolLMStateful
 from .tokenizer import DEFAULT_MODEL_DIR
 
 DEFAULT_OUT_DIR = Path("models/llm")
-PREFILL_LENGTHS = (16, 128, 512)
+PREFILL_LENGTHS = (64,)
 STATE_NAMES = ["keyCache", "valueCache"]
 DTYPES = {"fp16": torch.float16, "fp32": torch.float32}
 
@@ -56,7 +61,8 @@ def build_stateful(model: SmolLMStateful, prefill_lengths=PREFILL_LENGTHS) -> AI
     S = model.cfg.max_seq_len
     example_ids = torch.zeros(1, 16, dtype=torch.long)
     example_pos = torch.arange(16)[None]
-    seq = torch.export.Dim("seq", min=1, max=max(prefill_lengths))
+    # max is at least 16 so the size-16 example (never 1: gotcha 11) fits.
+    seq = torch.export.Dim("seq", min=1, max=max(16, *prefill_lengths))
     assert max(prefill_lengths) < S
     exported = torch.export.export(
         model,
