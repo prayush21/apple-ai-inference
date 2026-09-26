@@ -138,20 +138,23 @@ class Attention(nn.Module):
         q: torch.Tensor,  # [B, H, Tq, hd]
         k: torch.Tensor,  # [B, KV, Tk, hd]
         v: torch.Tensor,  # [B, KV, Tk, hd]
-        allowed: torch.Tensor,  # [n_rep * Tq, Tk] bool, row r*Tq + t is query t of group member r
+        allowed: torch.Tensor,  # [Tq, Tk] bool, True where attention is permitted
     ) -> torch.Tensor:
         B, H, Tq, hd = q.shape
         c = self.cfg
         # Grouped-query attention without materialising repeated keys: query
-        # head h uses KV head h // n_rep (HF's repeat_kv), so fold the n_rep
-        # heads of each group into the query-row axis and multiply against the
-        # KV heads directly. This keeps the per-step read of the 1024-slot
-        # cache at KV heads, not H.
-        q = q.reshape(B, c.num_key_value_heads, c.n_rep * Tq, hd)
-        scores = (q @ k.transpose(-1, -2)) * (hd**-0.5)  # [B, KV, n_rep*Tq, Tk]
+        # head h uses KV head h // n_rep (HF's repeat_kv), so split H into
+        # [KV, n_rep] and broadcast k/v over the n_rep axis in the matmul.
+        # This keeps the per-step read of the cache at KV heads, not H.
+        # The output goes [B, KV, n_rep, T, hd] -> [B, T, KV, n_rep, hd] ->
+        # [B, T, H*hd] in one permute + reshape: reshaping to [B, H, T, hd]
+        # first (or folding n_rep into the T axis) makes torch.export emit a
+        # stride guard it cannot prove for a dynamic T (gotcha 16).
+        q = q.view(B, c.num_key_value_heads, c.n_rep, Tq, hd)
+        scores = (q @ k[:, :, None].transpose(-1, -2)) * (hd**-0.5)  # [B, KV, n_rep, Tq, Tk]
         scores = scores.masked_fill(~allowed, float("-inf"))
         attn = F.softmax(scores.float(), dim=-1).to(q.dtype)
-        out = (attn @ v).reshape(B, H, Tq, hd).transpose(1, 2).reshape(B, Tq, H * hd)
+        out = (attn @ v[:, :, None]).permute(0, 3, 1, 2, 4).reshape(B, Tq, H * hd)
         return self.o_proj(out)
 
 
@@ -173,14 +176,6 @@ class DecoderLayer(nn.Module):
         self.self_attn = Attention(cfg)
         self.post_attention_layernorm = RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
         self.mlp = MLP(cfg)
-
-
-def expand_group_mask(allowed: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """``[Tq, Tk]`` -> ``[n_rep * Tq, Tk]`` by explicit expand (gotcha 3:
-    the comparison that built ``allowed`` already had equal operand shapes,
-    and nothing downstream broadcasts)."""
-    Tq, Tk = allowed.shape
-    return allowed[None].expand(n_rep, Tq, Tk).reshape(n_rep * Tq, Tk)
 
 
 class SmolLM(nn.Module):
@@ -210,7 +205,7 @@ class SmolLM(nn.Module):
         # Expanded to [T, T] on both sides before comparing (gotcha 3).
         rows = positions[:, None].expand(T, T)
         cols = positions[None, :].expand(T, T)
-        allowed = expand_group_mask(cols <= rows, c.n_rep)
+        allowed = cols <= rows
         for layer in self.layers:
             q, k, v = layer.self_attn.project(layer.input_layernorm(x), cos, sin)
             x = x + layer.self_attn.attend(q, k, v, allowed)
@@ -277,11 +272,9 @@ class SmolLMStateful(SmolLM):
         x = self.embed_tokens(input_ids)
         cos, sin = rope_cos_sin(position_ids, c.head_dim, c.rope_theta, x.dtype)
 
-        # [T, S] with both sides expanded explicitly (gotcha 3), then repeated
-        # for the n_rep query heads folded into each KV group.
+        # [T, S] with both sides expanded explicitly before comparing (gotcha 3).
         slots = torch.arange(S, device=input_ids.device)
         allowed = slots[None, :].expand(T, S) <= pos[:, None].expand(T, S)
-        allowed = expand_group_mask(allowed, c.n_rep)
 
         # scatter (-> scatter_along_axis) supports a dynamic T; index_put does
         # not (gotcha 2). Index is [1, KV, T, hd] along the slot axis.
