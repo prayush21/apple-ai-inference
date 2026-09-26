@@ -8,6 +8,8 @@ checkpoints/*.pt
 data/*
 # decide_ai ships its labeled holdout and the Jev response cache in-tree
 !data/decide/
+# llm_ai.reference golden run (prompt ids + greedy tokens), read by verify and tests
+!data/llm/
 .build/
 *.xcodeproj
 .DS_Store
