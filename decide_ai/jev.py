@@ -147,6 +147,7 @@ def _post(body: bytes, timeout: float) -> tuple[dict, float]:
                 time.sleep(wait)
                 continue
             if 500 <= e.code < 600 and attempt < 4:
+                transient_errors.append(f"HTTP {e.code}: {text[:200]}")
                 print(f"  jev: HTTP {e.code}, retrying in {backoff:.0f}s", file=sys.stderr, flush=True)
                 time.sleep(backoff)
                 backoff *= 2

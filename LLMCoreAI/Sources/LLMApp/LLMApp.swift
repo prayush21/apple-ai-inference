@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LLMCoreAI
 
@@ -32,11 +33,16 @@ struct LLMApp: App {
 
     var body: some Scene {
         WindowGroup("SmolLM2 · Core AI") {
+            #if canImport(CoreAI)
             if #available(macOS 27, *) {
                 ChatView()
             } else {
                 Text("CoreAI.framework needs macOS 27 — use llm_ai.serve").padding(32)
             }
+            #else
+            // ModelGenerator is compiled out of LLMCoreAI without the macOS 27 SDK.
+            Text("This build has no CoreAI.framework (needs Xcode 27) — use llm_ai.serve").padding(32)
+            #endif
         }
     }
 }
@@ -55,6 +61,7 @@ struct Turn: Identifiable {
     var text: String
 }
 
+#if canImport(CoreAI)
 @available(macOS 27, *)
 @MainActor
 final class ChatModel: ObservableObject {
@@ -257,3 +264,4 @@ struct ChatContent: View {
         }
     }
 }
+#endif

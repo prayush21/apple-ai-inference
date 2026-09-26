@@ -70,11 +70,15 @@ if let modelPath = a.option("--model") {
     #endif
 }
 
-#if DEBUG
-let isDebugBuild = true
-#else
-let isDebugBuild = false
-#endif
+// Computed, not a stored top-level `let`: globals in main.swift are
+// initialized in source order, and the --model branch above reads this first.
+var isDebugBuild: Bool {
+    #if DEBUG
+    return true
+    #else
+    return false
+    #endif
+}
 
 func loadavg1m() -> Double {
     var l = [0.0, 0.0, 0.0]

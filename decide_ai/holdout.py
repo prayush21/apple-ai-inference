@@ -76,7 +76,8 @@ def write_review(rows: list[dict], path: Path = REVIEW_PATH, *, reviewed: bool =
              "|---|---|---|" + "|".join("---" for _ in QUESTION_KEYS) + "|"]
     for r in rows:
         cells = " | ".join(label_cell(r["labels"][k]) for k in QUESTION_KEYS)
-        lines.append(f"| {r['id']} | {r['category'][0]} | {r['state'].replace('|', '\\|')} | {cells} |")
+        state = r["state"].replace("|", "\\|")  # not inside the f-string: backslashes there need 3.12
+        lines.append(f"| {r['id']} | {r['category'][0]} | {state} | {cells} |")
     path.write_text("\n".join(lines) + "\n")
 
 

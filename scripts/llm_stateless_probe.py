@@ -34,7 +34,8 @@ async def main(a):
         await lm.logits(ids[:n])
         calls.append({"T": n, "ms": round((time.perf_counter() - t0) * 1e3, 1)})
         print(calls[-1], flush=True)
-    steady = [c["ms"] for c in calls if c["T"] in (16, 18)][1:]
+    # Repeats of an already-seen length only; the first call at each length compiles.
+    steady = [c["ms"] for i, c in enumerate(calls) if any(p["T"] == c["T"] for p in calls[:i])]
     record = {
         "variant": "stateless", "runtime": runtime_name(), "compute": "gpu", "precision": "fp16",
         "prompt_tokens": 16, "generated_tokens": 0, "runs": 1,
